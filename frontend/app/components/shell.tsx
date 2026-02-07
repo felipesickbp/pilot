@@ -9,7 +9,7 @@ const nav = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/upload", label: "Upload Files" },
   { href: "/posting-rules", label: "Posting Rules" },
-  { href: "/clients", label: "Clients" },
+  { href: "/clients", label: "Direct Import" },
   { href: "/history", label: "History" },
 ];
 
