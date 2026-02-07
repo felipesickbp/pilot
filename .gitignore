@@ -1,0 +1,19 @@
+# env / secrets
+.env
+**/.env
+
+# node / next
+node_modules/
+**/node_modules/
+.next/
+out/
+dist/
+
+# logs
+*.log
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
+
