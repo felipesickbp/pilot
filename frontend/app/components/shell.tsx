@@ -3,6 +3,7 @@
 import Link from "next/link";
 import clsx from "clsx";
 import { Settings } from "lucide-react";
+import React from "react";
 
 const nav = [
   { href: "/dashboard", label: "Dashboard" },
