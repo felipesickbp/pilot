@@ -1,8 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 /* bp-pilot - global styles */
-:root { color-scheme: light; }
+:root {
+  color-scheme: light;
+  --bp-border: #e5e7eb; /* slate-200 */
+  --bp-pill: #f1f5f9;   /* slate-100 */
+}
+
 html, body { height: 100%; }
+
 body {
   margin: 0;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
 }
+
 * { box-sizing: border-box; }
