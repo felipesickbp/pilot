@@ -1,4 +1,4 @@
-{$DOMAIN} {
+(bp_common) {
   encode gzip
 
   # /api/* -> backend und /api prefix entfernen
@@ -10,4 +10,12 @@
   handle {
     reverse_proxy frontend:3000
   }
+}
+
+bp-pilot.ch {
+  import bp_common
+}
+
+app.bp-pilot.ch {
+  import bp_common
 }
