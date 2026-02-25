@@ -3,6 +3,12 @@ import "./landing.css";
 
 type Bullet = { title: string; text: string };
 
+const PREVIEWS = {
+  upload: "/landing/step-upload.png",
+  preview: "/landing/step-preview.png",
+  spreadsheet: "/landing/step-spreadsheet.png",
+};
+
 function Header() {
   return (
     <header className="topbar">
@@ -43,6 +49,39 @@ function Header() {
   );
 }
 
+function Shot({
+  src,
+  alt,
+}: {
+  src: string;
+  alt: string;
+}) {
+  return (
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        borderRadius: 16,
+        overflow: "hidden",
+        border: "1px solid rgba(15, 23, 42, 0.08)",
+        background: "rgba(255,255,255,0.6)",
+      }}
+    >
+      <img
+        src={src}
+        alt={alt}
+        loading="lazy"
+        style={{
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+          display: "block",
+        }}
+      />
+    </div>
+  );
+}
+
 function Hero() {
   return (
     <section className="hero" id="top">
@@ -78,13 +117,29 @@ function Hero() {
 
           <div className="device">
             <div className="device-grid">
-              {["1. Upload", "2. Preview", "3. Spreadsheet"].map((label) => (
-                <div key={label} className="device-card">
-                  <div className="device-label">{label}</div>
-                  <div className="device-blank" />
+              {[
+                { label: "1. Upload", src: PREVIEWS.upload, alt: "Upload Preview" },
+                { label: "2. Preview", src: PREVIEWS.preview, alt: "Preview Preview" },
+                { label: "3. Spreadsheet", src: PREVIEWS.spreadsheet, alt: "Spreadsheet Preview" },
+              ].map((x) => (
+                <div key={x.label} className="device-card">
+                  <div className="device-label">{x.label}</div>
+                  <div
+                    className="device-blank"
+                    style={{
+                      padding: 10,
+                      height: 170, // feel free to tweak
+                    }}
+                  >
+                    <Shot src={x.src} alt={x.alt} />
+                  </div>
                 </div>
               ))}
             </div>
+          </div>
+
+          <div style={{ marginTop: 10 }} className="muted center">
+            *Previews aus dem Live-Produkt (app.bp-pilot.ch)
           </div>
         </div>
       </div>
@@ -116,8 +171,10 @@ function FeatureBlock(props: {
   primary?: { label: string; href: string };
   secondary?: { label: string; href: string };
   reverse?: boolean;
+  imageSrc?: string;
+  imageAlt?: string;
 }) {
-  const { kicker, title, description, bullets, primary, secondary, reverse } = props;
+  const { kicker, title, description, bullets, primary, secondary, reverse, imageSrc, imageAlt } = props;
 
   return (
     <section className="feature" id={kicker.toLowerCase()}>
@@ -154,7 +211,19 @@ function FeatureBlock(props: {
         </div>
 
         <div className="card feature-visual">
-          <div className="visual" />
+          <div
+            className="visual"
+            style={{
+              padding: 12,
+              height: 340, // feel free to tweak
+            }}
+          >
+            {imageSrc ? (
+              <Shot src={imageSrc} alt={imageAlt || `${kicker} Preview`} />
+            ) : (
+              <div style={{ width: "100%", height: "100%" }} />
+            )}
+          </div>
         </div>
       </div>
     </section>
@@ -268,6 +337,8 @@ export default function LandingPage() {
           ]}
           primary={{ label: "Upload öffnen", href: "https://app.bp-pilot.ch/upload" }}
           secondary={{ label: "Preview ansehen", href: "https://app.bp-pilot.ch/preview" }}
+          imageSrc={PREVIEWS.upload}
+          imageAlt="Upload Wizard Screenshot"
         />
 
         <FeatureBlock
@@ -281,6 +352,8 @@ export default function LandingPage() {
           primary={{ label: "Preview öffnen", href: "https://app.bp-pilot.ch/preview" }}
           secondary={{ label: "In Tabelle", href: "https://app.bp-pilot.ch/spreadsheet" }}
           reverse
+          imageSrc={PREVIEWS.preview}
+          imageAlt="Preview & Mapping Screenshot"
         />
 
         <FeatureBlock
@@ -293,6 +366,8 @@ export default function LandingPage() {
           ]}
           primary={{ label: "Spreadsheet öffnen", href: "https://app.bp-pilot.ch/spreadsheet" }}
           secondary={{ label: "Login", href: "https://app.bp-pilot.ch/login" }}
+          imageSrc={PREVIEWS.spreadsheet}
+          imageAlt="Spreadsheet Screenshot"
         />
 
         <div id="pricing" className="container section-head" style={{ paddingTop: 24 }}>
