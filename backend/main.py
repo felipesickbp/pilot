@@ -14,9 +14,19 @@ import chardet
 import pandas as pd
 import requests
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Response, Query
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
+from app.db import get_engine
+from app.services.history_store import (
+    delete_import_history,
+    get_import_history_item,
+    get_import_history_csv,
+    init_history_schema,
+    insert_import_history,
+    list_import_history,
+)
 
 app = FastAPI()
 
@@ -28,6 +38,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+db_engine = get_engine()
+
+
+@app.on_event("startup")
+def _startup() -> None:
+    init_history_schema(db_engine)
 
 
 @app.get("/health")
@@ -103,6 +120,27 @@ def _extract_client_name_from_payload(payload: Any) -> str:
             nested_name = _extract_client_name_from_payload(item)
             if nested_name:
                 return nested_name
+
+    return ""
+
+
+def _extract_client_id_from_payload(payload: Any) -> str:
+    if isinstance(payload, dict):
+        for key in ("id", "tenant_id", "company_id", "uuid", "uid"):
+            v = payload.get(key)
+            if v is not None and str(v).strip():
+                return str(v).strip()
+        nested = payload.get("data")
+        if nested is not None:
+            nested_id = _extract_client_id_from_payload(nested)
+            if nested_id:
+                return nested_id
+
+    if isinstance(payload, list):
+        for item in payload:
+            nested_id = _extract_client_id_from_payload(item)
+            if nested_id:
+                return nested_id
 
     return ""
 
@@ -202,20 +240,46 @@ def _fetch_bexio_client_name(sid: str, sess: Dict[str, Any]) -> str:
     return ""
 
 
+def _ensure_tenant_context(sid: str, sess: Dict[str, Any]) -> Tuple[str, str]:
+    tenant_id = str(sess.get("tenant_id") or "").strip()
+    tenant_name = str(sess.get("client_name") or "").strip()
+
+    if tenant_id and tenant_name:
+        return tenant_id, tenant_name
+
+    profile = _fetch_company_profile(sid, sess)
+    if profile:
+        profile_tenant_id = _extract_client_id_from_payload(profile)
+        profile_tenant_name = _extract_client_name_from_payload(profile)
+        if profile_tenant_id:
+            tenant_id = f"bexio:{profile_tenant_id}"
+        if profile_tenant_name:
+            tenant_name = profile_tenant_name
+
+    if not tenant_id:
+        tenant_id = f"session:{sid}"
+    if not tenant_name:
+        tenant_name = "Connected bexio client"
+
+    sess["tenant_id"] = tenant_id
+    sess["client_name"] = tenant_name
+    _bexio_sessions[sid] = sess
+    return tenant_id, tenant_name
+
+
 @app.get("/bexio/session")
 def bexio_session(request: Request):
     sid = request.cookies.get(BEXIO_SESSION_COOKIE)
     sess = _bexio_sessions.get(sid or "", {})
     connected = bool(sess.get("access_token"))
     client_name = str(sess.get("client_name") or "").strip()
-    if connected and not client_name and sid:
-        client_name = _fetch_bexio_client_name(sid, sess)
-        if client_name:
-            sess["client_name"] = client_name
-            _bexio_sessions[sid] = sess
+    tenant_id = str(sess.get("tenant_id") or "").strip()
+    if connected and sid and (not client_name or not tenant_id):
+        tenant_id, client_name = _ensure_tenant_context(sid, sess)
     return {
         "connected": connected,
         "client_name": client_name if connected else "",
+        "tenant_id": tenant_id if connected else "",
     }
 
 
@@ -289,11 +353,7 @@ def bexio_callback(
         "client_name": "",
     }
     _bexio_sessions[sid] = new_sess
-    client_name = _fetch_bexio_client_name(sid, new_sess) or "Connected bexio client"
-    final_sess = _bexio_sessions.get(sid, new_sess)
-    final_sess["oauth_state"] = ""
-    final_sess["client_name"] = client_name
-    _bexio_sessions[sid] = final_sess
+    _ensure_tenant_context(sid, new_sess)
 
     app_redirect = os.getenv("BEXIO_APP_REDIRECT_AFTER_LOGIN", "/upload")
     if app_redirect.startswith("/"):
@@ -755,6 +815,82 @@ def _post_with_backoff(
     return False, "Max retries exceeded"
 
 
+def _model_dump_compat(row: BaseModel) -> Dict[str, Any]:
+    if hasattr(row, "model_dump"):
+        return row.model_dump()
+    return row.dict()  # type: ignore[attr-defined]
+
+
+def _rows_to_csv_bytes(rows: List[Dict[str, Any]]) -> bytes:
+    columns = [
+        "row",
+        "csv_row",
+        "doc",
+        "date",
+        "text",
+        "amount",
+        "currency",
+        "fx",
+        "debit",
+        "credit",
+        "vatCode",
+        "vatAccount",
+        "reference_nr",
+    ]
+    out = io.StringIO()
+    writer = csv.DictWriter(out, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row)
+    return out.getvalue().encode("utf-8")
+
+
+def _history_tenant_context_or_401(request: Request) -> Tuple[str, str]:
+    sid, sess = _get_bexio_session_or_401(request)
+    return _ensure_tenant_context(sid, sess)
+
+
+@app.get("/imports/history")
+def imports_history(request: Request, limit: int = Query(default=100, ge=1, le=500)) -> Dict[str, Any]:
+    tenant_id, tenant_name = _history_tenant_context_or_401(request)
+    items = list_import_history(db_engine, tenant_id=tenant_id, limit=limit)
+    return {"tenant_id": tenant_id, "tenant_name": tenant_name, "items": items}
+
+
+@app.get("/imports/history/{import_id}/csv")
+def imports_history_csv(import_id: str, request: Request) -> StreamingResponse:
+    tenant_id, _tenant_name = _history_tenant_context_or_401(request)
+    try:
+        csv_bytes, file_name = get_import_history_csv(db_engine, tenant_id=tenant_id, import_id=import_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
+    )
+
+
+@app.get("/imports/history/{import_id}")
+def imports_history_item(import_id: str, request: Request) -> Dict[str, Any]:
+    tenant_id, _tenant_name = _history_tenant_context_or_401(request)
+    try:
+        item = get_import_history_item(db_engine, tenant_id=tenant_id, import_id=import_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return item
+
+
+@app.delete("/imports/history/{import_id}")
+def imports_history_delete(import_id: str, request: Request) -> Dict[str, Any]:
+    tenant_id, _tenant_name = _history_tenant_context_or_401(request)
+    deleted = delete_import_history(db_engine, tenant_id=tenant_id, import_id=import_id)
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="Import history item not found")
+    return {"deleted": True, "import_id": import_id}
+
+
 @app.post("/bexio/direct-import/post")
 def post_direct_import_to_bexio(payload: DirectImportPostRequest, request: Request) -> Dict[str, Any]:
     sid, sess = _get_bexio_session_or_401(request)
@@ -897,10 +1033,28 @@ def post_direct_import_to_bexio(payload: DirectImportPostRequest, request: Reque
     ok_count = sum(1 for r in results if r.get("status") == "OK")
     dry_count = sum(1 for r in results if r.get("status") == "DRY_RUN")
     error_count = sum(1 for r in results if r.get("status") == "ERROR")
+    history_import_id = None
+    history_warning = None
+    try:
+        tenant_id, tenant_name = _ensure_tenant_context(sid, sess)
+        payload_rows = [_model_dump_compat(r) for r in payload.rows]
+        history_import_id = insert_import_history(
+            db_engine,
+            tenant_id=tenant_id,
+            tenant_name=tenant_name,
+            payload_rows=payload_rows,
+            results=results,
+            csv_bytes=_rows_to_csv_bytes(payload_rows),
+        )
+    except Exception as e:
+        history_warning = f"History persistence failed: {e}"
+
     return {
+        "import_id": history_import_id,
         "ok_count": ok_count,
         "dry_run_count": dry_count,
         "error_count": error_count,
         "total": len(results),
         "results": results,
+        "history_warning": history_warning,
     }
