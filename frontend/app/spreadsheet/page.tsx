@@ -3,8 +3,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { AppShell } from "../components/shell";
 import { FlowStepper } from "../components/stepper";
-import { Badge, Button, Card, CardContent, CardHeader, Subhead, Input } from "../components/ui";
-import { Copy, ClipboardPaste, Plus, Save } from "lucide-react";
+import { Badge, Button, Card, CardContent, CardHeader, Subhead } from "../components/ui";
+import { Send } from "lucide-react";
 import { type NormalizedRow } from "../importer";
 
 type Row = NormalizedRow;
@@ -21,18 +21,29 @@ function safeParse<T>(s: string | null): T | null {
   }
 }
 
+type PostResultRow = {
+  row: number;
+  csv_row?: number;
+  status: string;
+  id?: number;
+  reference_nr?: string;
+  error?: string;
+};
+
 export default function SpreadsheetPage() {
+  const apiBase = useMemo(() => process.env.NEXT_PUBLIC_API_BASE || "/api", []);
   const [rows, setRows] = useState<Row[]>([]);
-  const [bankAccount, setBankAccount] = useState<string>("1020");
   const [fileTypeBadge, setFileTypeBadge] = useState<string>("IMPORT");
   const [toast, setToast] = useState<string>("");
+  const [submitting, setSubmitting] = useState<boolean>(false);
+  const [submitSummary, setSubmitSummary] = useState<string>("");
+  const [submitResults, setSubmitResults] = useState<PostResultRow[]>([]);
 
   useEffect(() => {
     const stored = safeParse<any[]>(sessionStorage.getItem(STORAGE_KEY));
     const meta = safeParse<any>(sessionStorage.getItem(STORAGE_META_KEY));
 
-    const selectedBankAccount = meta?.bankAccount ? String(meta.bankAccount) : bankAccount;
-    if (meta?.bankAccount) setBankAccount(selectedBankAccount);
+    const selectedBankAccount = meta?.bankAccount ? String(meta.bankAccount) : "1020";
     if (meta?.fileType) setFileTypeBadge(String(meta.fileType).toUpperCase());
 
     if (stored?.length) {
@@ -59,11 +70,12 @@ export default function SpreadsheetPage() {
           description: String(r?.description || ""),
           amount,
           currency: String(r?.currency || "CHF"),
-          fx: Number(r?.fx ?? 1) || 1,
+          fx: Number(r?.fx ?? r?.exchangeRate ?? 1) || 1,
           direction,
           sollAccount,
           habenAccount,
           vatCode: String(r?.vatCode || ""),
+          vatAccount: String(r?.vatAccount || ""),
           originalRow: r?.originalRow,
         } as Row;
       });
@@ -83,19 +95,13 @@ export default function SpreadsheetPage() {
           sollAccount: "",
           habenAccount: meta?.bankAccount || "1020",
           vatCode: "",
+          vatAccount: "",
         },
       ]);
       setToast("No imported rows found in session. Go to Upload and import a bank export file.");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Update stored bankAccount if user changes it here
-  useEffect(() => {
-    const meta = safeParse<any>(sessionStorage.getItem(STORAGE_META_KEY)) || {};
-    meta.bankAccount = bankAccount;
-    sessionStorage.setItem(STORAGE_META_KEY, JSON.stringify(meta));
-  }, [bankAccount]);
 
   const completedCount = useMemo(() => {
     return rows.filter((r) => r.sollAccount && r.habenAccount).length;
@@ -114,18 +120,70 @@ export default function SpreadsheetPage() {
     });
   }
 
-  function applyBankAccountToAll() {
-    // Applies the chosen bankAccount to the correct side depending on direction
-    setRows((prev) => {
-      const next = prev.map((r) => {
-        if (r.direction === "CRDT") return { ...r, sollAccount: bankAccount };
-        if (r.direction === "DBIT") return { ...r, habenAccount: bankAccount };
-        return r;
+  async function submitToBexio() {
+    setToast("");
+    setSubmitSummary("");
+    setSubmitResults([]);
+
+    if (!rows.length) {
+      setToast("No rows to submit.");
+      return;
+    }
+
+    const postRows = rows
+      .filter((r) => r.date || Number(r.amount) !== 0 || r.sollAccount || r.habenAccount)
+      .map((r, idx) => ({
+        row: idx + 1,
+        doc: r.id,
+        date: r.date,
+        text: r.description,
+        amount: Number(r.amount),
+        currency: r.currency || "CHF",
+        fx: Number(r.fx || 1),
+        debit: r.sollAccount,
+        credit: r.habenAccount,
+        vatCode: r.vatCode || "",
+        vatAccount: r.vatAccount || "",
+        reference_nr: "",
+      }));
+
+    if (!postRows.length) {
+      setToast("No valid rows to submit.");
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      const r = await fetch(`${apiBase}/bexio/direct-import/post`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rows: postRows,
+          auto_reference_nr: true,
+          batch_size: 25,
+          sleep_between_batches: 2,
+          max_retries: 5,
+          dry_run: false,
+        }),
       });
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      setToast("Applied bank account to all rows (direction-aware).");
-      return next;
-    });
+
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const detail = data?.detail || "Submit failed.";
+        throw new Error(String(detail));
+      }
+
+      const ok = Number(data?.ok_count || 0);
+      const dry = Number(data?.dry_run_count || 0);
+      const err = Number(data?.error_count || 0);
+      setSubmitSummary(`Finished. OK: ${ok}, Dry-run: ${dry}, Errors: ${err}`);
+      setSubmitResults(Array.isArray(data?.results) ? data.results : []);
+    } catch (e: any) {
+      setToast(e?.message || "Could not submit to Bexio.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -133,7 +191,7 @@ export default function SpreadsheetPage() {
       <div className="mb-6">
         <div className="text-3xl font-semibold">Transaction Spreadsheet</div>
         <Subhead>
-          Bank account is auto-filled direction-aware (CRDT/DBIT). Fill missing counterpart accounts and VAT.
+          Review and complete counterpart accounts and VAT before posting to bexio.
         </Subhead>
       </div>
 
@@ -154,30 +212,8 @@ export default function SpreadsheetPage() {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <div className="flex items-center gap-2 rounded-2xl border border-[color:var(--bp-border)] bg-white px-3 py-2">
-            <div className="text-xs font-semibold text-slate-600">Bankkonto</div>
-            <Input
-              value={bankAccount}
-              onChange={(e) => setBankAccount(e.target.value)}
-              className="w-24"
-              placeholder="1020"
-            />
-            <Button variant="outline" onClick={applyBankAccountToAll}>
-              Apply
-            </Button>
-          </div>
-
-          <Button variant="outline">
-            <Copy className="h-4 w-4" /> Copy
-          </Button>
-          <Button variant="outline">
-            <ClipboardPaste className="h-4 w-4" /> Paste
-          </Button>
-          <Button variant="outline">
-            <Plus className="h-4 w-4" /> Add Rule
-          </Button>
-          <Button>
-            <Save className="h-4 w-4" /> Save
+          <Button onClick={submitToBexio} disabled={submitting}>
+            <Send className="h-4 w-4" /> {submitting ? "Submitting..." : "Submit to Bexio"}
           </Button>
         </div>
       </div>
@@ -189,7 +225,7 @@ export default function SpreadsheetPage() {
               {completedCount} of {rows.length} transactions completed
             </div>
             <div className="text-sm text-slate-500">
-              Soll/Haben is partly auto-filled (bank side). Fill counterpart account(s) and VAT where needed.
+              Fill missing Soll/Haben accounts and VAT fields where needed.
             </div>
           </div>
           <div className="w-40">
@@ -209,10 +245,10 @@ export default function SpreadsheetPage() {
           </CardHeader>
           <CardContent>
             <div className="overflow-auto rounded-xl border border-[color:var(--bp-border)] bg-white">
-              <table className="min-w-[1100px] w-full text-sm">
+              <table className="min-w-[1250px] w-full text-sm">
                 <thead className="bg-slate-50 text-slate-600">
                   <tr>
-                    {["Doc", "Date", "Description", "Amount", "Currency", "FX", "Dir", "Soll", "Haben", "VAT"].map((h) => (
+                    {["Doc", "Date", "Description", "Amount", "Currency", "FX", "Dir", "Soll", "Haben", "VAT", "VAT Account"].map((h) => (
                       <th key={h} className="p-3 text-left">
                         {h}
                       </th>
@@ -292,6 +328,16 @@ export default function SpreadsheetPage() {
                             />
                           </div>
                         </td>
+                        <td className="p-3">
+                          <div className="rounded-lg border border-[color:var(--bp-border)] bg-white px-2 py-1">
+                            <input
+                              className="w-full bg-transparent outline-none"
+                              placeholder="e.g. 2200"
+                              value={r.vatAccount || ""}
+                              onChange={(e) => updateRow(r.id, { vatAccount: e.target.value })}
+                            />
+                          </div>
+                        </td>
                       </tr>
                     );
                   })}
@@ -302,6 +348,34 @@ export default function SpreadsheetPage() {
             <div className="mt-3 text-xs text-slate-500">
               Next: “Submit to Bexio” will call backend API (validate → map accounts/VAT → post).
             </div>
+            {submitSummary ? <div className="mt-3 text-sm font-medium text-slate-700">{submitSummary}</div> : null}
+            {submitResults.length ? (
+              <div className="mt-3 overflow-auto rounded-xl border border-[color:var(--bp-border)] bg-white">
+                <table className="min-w-[700px] w-full text-sm">
+                  <thead className="bg-slate-50 text-slate-600">
+                    <tr>
+                      {["Row", "CSV Row", "Status", "ID", "Ref", "Error"].map((h) => (
+                        <th key={h} className="p-2 text-left">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {submitResults.map((r, i) => (
+                      <tr key={`${r.row}-${i}`} className="border-t border-[color:var(--bp-border)]">
+                        <td className="p-2">{r.row}</td>
+                        <td className="p-2">{r.csv_row ?? ""}</td>
+                        <td className="p-2">{r.status}</td>
+                        <td className="p-2">{r.id ?? ""}</td>
+                        <td className="p-2">{r.reference_nr ?? ""}</td>
+                        <td className="p-2 text-red-600">{r.error ?? ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       </div>

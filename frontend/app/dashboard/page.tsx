@@ -32,7 +32,7 @@ export default function DashboardPage() {
             <CardContent className="grid gap-3">
               <Action title="Upload New File" desc="Process CSV, XLSX, or CAMT.053 files" href="/upload" />
               <Action title="Manage Posting Rules" desc="Configure automatic account assignments" href="/posting-rules" />
-              <Action title="Add Bexio Client" desc="Connect new Bexio account" href="/clients" />
+              <Action title="Direct Import" desc="Paste TSV and send to Bexio" href="/direct-import" />
               <div className="pt-2">
                 <Button className="w-full">Open Upload Flow</Button>
               </div>
