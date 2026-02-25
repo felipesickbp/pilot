@@ -10,8 +10,10 @@ import {
   PREVIEW_ROWS_KEY,
   STORAGE_KEY,
   STORAGE_META_KEY,
+  type CleanupRuleKey,
+  type CleanupRuleOptions,
   type NormalizedRow,
-  cleanDescription,
+  cleanDescriptionWithDiagnostics,
 } from "../importer";
 
 export default function CleanupPage() {
@@ -25,6 +27,8 @@ export default function CleanupPage() {
   const [stripIbanRefs, setStripIbanRefs] = useState(true);
   const [stripAddressBits, setStripAddressBits] = useState(true);
   const [titleCase, setTitleCase] = useState(true);
+  const [rowRuleOverrides, setRowRuleOverrides] = useState<Record<string, Partial<CleanupRuleOptions>>>({});
+  const [rowRollback, setRowRollback] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     try {
@@ -43,31 +47,87 @@ export default function CleanupPage() {
     }
   }, []);
 
+  const globalRules = useMemo<CleanupRuleOptions>(
+    () => ({
+      stripBookingWords,
+      stripIbanRefs,
+      stripAddressBits,
+      titleCase,
+    }),
+    [stripBookingWords, stripIbanRefs, stripAddressBits, titleCase]
+  );
+
   const cleanedRows = useMemo(() => {
-    return rows.map((r) => ({
-      ...r,
-      description: cleanDescription(r.description, {
-        stripBookingWords,
-        stripIbanRefs,
-        stripAddressBits,
-        titleCase,
-      }),
-    }));
-  }, [rows, stripBookingWords, stripIbanRefs, stripAddressBits, titleCase]);
+    return rows.map((r) => {
+      const rollback = !!rowRollback[r.id];
+      const overrides = rowRuleOverrides[r.id] || {};
+      const effectiveRules: CleanupRuleOptions = rollback
+        ? {
+            stripBookingWords: false,
+            stripIbanRefs: false,
+            stripAddressBits: false,
+            titleCase: false,
+          }
+        : { ...globalRules, ...overrides };
+      const result = cleanDescriptionWithDiagnostics(r.description, effectiveRules);
+      return {
+        ...r,
+        description: rollback ? r.description : result.text,
+        cleanup: {
+          rollback,
+          effectiveRules,
+          changedRules: rollback ? [] : result.changedRules,
+        },
+      };
+    });
+  }, [rows, globalRules, rowRuleOverrides, rowRollback]);
+
+  function toggleRowRollback(id: string) {
+    setRowRollback((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
+
+  function toggleRowRule(id: string, key: CleanupRuleKey) {
+    setRowRuleOverrides((prev) => {
+      const current = prev[id] || {};
+      const effectiveNow = current[key] ?? globalRules[key];
+      const nextEffective = !effectiveNow;
+      const next = { ...current } as Partial<CleanupRuleOptions>;
+
+      if (nextEffective === globalRules[key]) {
+        delete next[key];
+      } else {
+        next[key] = nextEffective;
+      }
+
+      if (!Object.keys(next).length) {
+        const { [id]: _drop, ...rest } = prev;
+        return rest;
+      }
+
+      return { ...prev, [id]: next };
+    });
+  }
 
   function goSpreadsheet() {
     if (!cleanedRows.length) return;
+    const finalRows = cleanedRows.map(({ cleanup, ...row }) => row);
 
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(cleanedRows));
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(finalRows));
     sessionStorage.setItem(
       STORAGE_META_KEY,
       JSON.stringify({
         ...(meta || {}),
         cleanup: {
-          stripBookingWords,
-          stripIbanRefs,
-          stripAddressBits,
-          titleCase,
+          globalRules,
+          rowRuleOverrides,
+          rowRollback,
+          changedRows: cleanedRows
+            .filter((r) => r.cleanup.changedRules.length > 0 || r.cleanup.rollback)
+            .map((r) => ({
+              id: r.id,
+              rollback: r.cleanup.rollback,
+              changedRules: r.cleanup.changedRules,
+            })),
         },
         createdAt: new Date().toISOString(),
       })
@@ -168,6 +228,7 @@ export default function CleanupPage() {
                       <th className="p-3 text-left">Original</th>
                       <th className="p-3 text-left">Cleaned</th>
                       <th className="p-3 text-left">Amount</th>
+                      <th className="p-3 text-left">Row Controls</th>
                     </tr>
                   </thead>
                   <tbody className="text-slate-700">
@@ -178,11 +239,72 @@ export default function CleanupPage() {
                         <td className="p-3">
                           <Badge variant="pink">{r.amount.toFixed(2)}</Badge>
                         </td>
+                        <td className="p-3 text-xs">
+                          <div className="grid gap-2">
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={r.cleanup.rollback}
+                                onChange={() => toggleRowRollback(r.id)}
+                              />
+                              Use original text
+                            </label>
+                            <div className="grid grid-cols-2 gap-1">
+                              <label className="flex items-center gap-1">
+                                <input
+                                  type="checkbox"
+                                  checked={r.cleanup.effectiveRules.stripBookingWords}
+                                  onChange={() => toggleRowRule(r.id, "stripBookingWords")}
+                                  disabled={r.cleanup.rollback}
+                                />
+                                Booking
+                              </label>
+                              <label className="flex items-center gap-1">
+                                <input
+                                  type="checkbox"
+                                  checked={r.cleanup.effectiveRules.stripIbanRefs}
+                                  onChange={() => toggleRowRule(r.id, "stripIbanRefs")}
+                                  disabled={r.cleanup.rollback}
+                                />
+                                IBAN/Refs
+                              </label>
+                              <label className="flex items-center gap-1">
+                                <input
+                                  type="checkbox"
+                                  checked={r.cleanup.effectiveRules.stripAddressBits}
+                                  onChange={() => toggleRowRule(r.id, "stripAddressBits")}
+                                  disabled={r.cleanup.rollback}
+                                />
+                                Address
+                              </label>
+                              <label className="flex items-center gap-1">
+                                <input
+                                  type="checkbox"
+                                  checked={r.cleanup.effectiveRules.titleCase}
+                                  onChange={() => toggleRowRule(r.id, "titleCase")}
+                                  disabled={r.cleanup.rollback}
+                                />
+                                Title Case
+                              </label>
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {r.cleanup.rollback ? <Badge variant="pink">rollback</Badge> : null}
+                              {r.cleanup.changedRules.map((rule) => (
+                                <Badge key={`${r.id}-${rule}`} variant="blue">
+                                  {rule}
+                                </Badge>
+                              ))}
+                              {!r.cleanup.rollback && !r.cleanup.changedRules.length ? (
+                                <span className="text-slate-400">no changes</span>
+                              ) : null}
+                            </div>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                     {!cleanedRows.length ? (
                       <tr>
-                        <td colSpan={3} className="p-6 text-center text-slate-500">
+                        <td colSpan={4} className="p-6 text-center text-slate-500">
                           No rows available.
                         </td>
                       </tr>

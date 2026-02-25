@@ -5,19 +5,9 @@ import { AppShell } from "../components/shell";
 import { FlowStepper } from "../components/stepper";
 import { Badge, Button, Card, CardContent, CardHeader, Subhead, Input } from "../components/ui";
 import { Copy, ClipboardPaste, Plus, Save } from "lucide-react";
+import { type NormalizedRow } from "../importer";
 
-type Row = {
-  id: string;
-  date: string; // YYYY-MM-DD
-  description: string;
-  amount: number;
-  currency: string;
-  fx: number;
-  direction?: "CRDT" | "DBIT";
-  debitAccount: string;
-  creditAccount: string;
-  vatCode: string;
-};
+type Row = NormalizedRow;
 
 const STORAGE_KEY = "bp_pilot_direct_import_rows_v1";
 const STORAGE_META_KEY = "bp_pilot_direct_import_meta_v1";
@@ -34,25 +24,48 @@ function safeParse<T>(s: string | null): T | null {
 export default function SpreadsheetPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [bankAccount, setBankAccount] = useState<string>("1020");
+  const [fileTypeBadge, setFileTypeBadge] = useState<string>("IMPORT");
   const [toast, setToast] = useState<string>("");
 
   useEffect(() => {
-    const stored = safeParse<Row[]>(sessionStorage.getItem(STORAGE_KEY));
+    const stored = safeParse<any[]>(sessionStorage.getItem(STORAGE_KEY));
     const meta = safeParse<any>(sessionStorage.getItem(STORAGE_META_KEY));
 
-    if (meta?.bankAccount) setBankAccount(String(meta.bankAccount));
+    const selectedBankAccount = meta?.bankAccount ? String(meta.bankAccount) : bankAccount;
+    if (meta?.bankAccount) setBankAccount(selectedBankAccount);
+    if (meta?.fileType) setFileTypeBadge(String(meta.fileType).toUpperCase());
 
     if (stored?.length) {
-      // Ensure debit/credit are prefilled correctly based on direction + bankAccount
-      const normalized = stored.map((r) => {
-        const dir = r.direction;
-        if (dir === "CRDT") {
-          return { ...r, debitAccount: r.debitAccount || meta?.bankAccount || bankAccount, creditAccount: r.creditAccount || "" };
-        }
-        if (dir === "DBIT") {
-          return { ...r, creditAccount: r.creditAccount || meta?.bankAccount || bankAccount, debitAccount: r.debitAccount || "" };
-        }
-        return r;
+      // Backward compatibility: support old debit/credit keys and normalize to soll/haben.
+      const normalized = stored.map((r, idx) => {
+        const parsedAmount = Number(r?.amount ?? 0);
+        const amount = Number.isFinite(parsedAmount) ? parsedAmount : 0;
+        const direction: "CRDT" | "DBIT" =
+          r?.direction === "DBIT" || r?.direction === "CRDT"
+            ? r.direction
+            : amount < 0
+              ? "DBIT"
+              : "CRDT";
+
+        let sollAccount = String(r?.sollAccount ?? r?.debitAccount ?? "").trim();
+        let habenAccount = String(r?.habenAccount ?? r?.creditAccount ?? "").trim();
+
+        if (direction === "CRDT" && !sollAccount) sollAccount = selectedBankAccount;
+        if (direction === "DBIT" && !habenAccount) habenAccount = selectedBankAccount;
+
+        return {
+          id: String(r?.id || `DI${String(idx + 1).padStart(4, "0")}`),
+          date: String(r?.date || ""),
+          description: String(r?.description || ""),
+          amount,
+          currency: String(r?.currency || "CHF"),
+          fx: Number(r?.fx ?? 1) || 1,
+          direction,
+          sollAccount,
+          habenAccount,
+          vatCode: String(r?.vatCode || ""),
+          originalRow: r?.originalRow,
+        } as Row;
       });
 
       setRows(normalized);
@@ -67,12 +80,12 @@ export default function SpreadsheetPage() {
           currency: "CHF",
           fx: 1,
           direction: "DBIT",
-          debitAccount: "",
-          creditAccount: meta?.bankAccount || "1020",
+          sollAccount: "",
+          habenAccount: meta?.bankAccount || "1020",
           vatCode: "",
         },
       ]);
-      setToast("No imported CAMT data found in session. Go to Upload and load a CAMT file.");
+      setToast("No imported rows found in session. Go to Upload and import a bank export file.");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -85,7 +98,7 @@ export default function SpreadsheetPage() {
   }, [bankAccount]);
 
   const completedCount = useMemo(() => {
-    return rows.filter((r) => r.debitAccount && r.creditAccount).length;
+    return rows.filter((r) => r.sollAccount && r.habenAccount).length;
   }, [rows]);
 
   const pct = useMemo(() => {
@@ -105,8 +118,8 @@ export default function SpreadsheetPage() {
     // Applies the chosen bankAccount to the correct side depending on direction
     setRows((prev) => {
       const next = prev.map((r) => {
-        if (r.direction === "CRDT") return { ...r, debitAccount: bankAccount };
-        if (r.direction === "DBIT") return { ...r, creditAccount: bankAccount };
+        if (r.direction === "CRDT") return { ...r, sollAccount: bankAccount };
+        if (r.direction === "DBIT") return { ...r, habenAccount: bankAccount };
         return r;
       });
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
@@ -119,7 +132,9 @@ export default function SpreadsheetPage() {
     <AppShell active="Upload Files">
       <div className="mb-6">
         <div className="text-3xl font-semibold">Transaction Spreadsheet</div>
-        <Subhead>CAMT mode: bank account is auto-filled based on CRDT/DBIT. Fill the missing counterpart accounts & VAT.</Subhead>
+        <Subhead>
+          Bank account is auto-filled direction-aware (CRDT/DBIT). Fill missing counterpart accounts and VAT.
+        </Subhead>
       </div>
 
       <div className="mb-8">
@@ -135,7 +150,7 @@ export default function SpreadsheetPage() {
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
           <div className="text-xl font-semibold">✨ Transaction Data</div>
-          <Badge variant="blue">CAMT</Badge>
+          <Badge variant="blue">{fileTypeBadge}</Badge>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -174,7 +189,7 @@ export default function SpreadsheetPage() {
               {completedCount} of {rows.length} transactions completed
             </div>
             <div className="text-sm text-slate-500">
-              Debit/Credit is partly auto-filled (bank side). Fill counterpart account(s) + VAT where needed.
+              Soll/Haben is partly auto-filled (bank side). Fill counterpart account(s) and VAT where needed.
             </div>
           </div>
           <div className="w-40">
@@ -197,7 +212,7 @@ export default function SpreadsheetPage() {
               <table className="min-w-[1100px] w-full text-sm">
                 <thead className="bg-slate-50 text-slate-600">
                   <tr>
-                    {["Doc", "Date", "Description", "Amount", "Currency", "FX", "Dir", "Debit", "Credit", "VAT"].map((h) => (
+                    {["Doc", "Date", "Description", "Amount", "Currency", "FX", "Dir", "Soll", "Haben", "VAT"].map((h) => (
                       <th key={h} className="p-3 text-left">
                         {h}
                       </th>
@@ -207,8 +222,8 @@ export default function SpreadsheetPage() {
 
                 <tbody className="text-slate-700">
                   {rows.map((r) => {
-                    const debitMissing = !r.debitAccount;
-                    const creditMissing = !r.creditAccount;
+                    const sollMissing = !r.sollAccount;
+                    const habenMissing = !r.habenAccount;
                     const vatMissing = !r.vatCode;
 
                     return (
@@ -246,23 +261,23 @@ export default function SpreadsheetPage() {
                         </td>
 
                         <td className="p-3">
-                          <div className={`rounded-lg border px-2 py-1 ${debitMissing ? "border-pink-200 bg-pink-50" : "border-[color:var(--bp-border)] bg-white"}`}>
+                          <div className={`rounded-lg border px-2 py-1 ${sollMissing ? "border-pink-200 bg-pink-50" : "border-[color:var(--bp-border)] bg-white"}`}>
                             <input
                               className="w-full bg-transparent outline-none"
-                              placeholder="Debit"
-                              value={r.debitAccount}
-                              onChange={(e) => updateRow(r.id, { debitAccount: e.target.value })}
+                              placeholder="Soll"
+                              value={r.sollAccount}
+                              onChange={(e) => updateRow(r.id, { sollAccount: e.target.value })}
                             />
                           </div>
                         </td>
 
                         <td className="p-3">
-                          <div className={`rounded-lg border px-2 py-1 ${creditMissing ? "border-pink-200 bg-pink-50" : "border-[color:var(--bp-border)] bg-white"}`}>
+                          <div className={`rounded-lg border px-2 py-1 ${habenMissing ? "border-pink-200 bg-pink-50" : "border-[color:var(--bp-border)] bg-white"}`}>
                             <input
                               className="w-full bg-transparent outline-none"
-                              placeholder="Credit"
-                              value={r.creditAccount}
-                              onChange={(e) => updateRow(r.id, { creditAccount: e.target.value })}
+                              placeholder="Haben"
+                              value={r.habenAccount}
+                              onChange={(e) => updateRow(r.id, { habenAccount: e.target.value })}
                             />
                           </div>
                         </td>
