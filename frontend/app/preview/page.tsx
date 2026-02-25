@@ -1,108 +1,447 @@
+"use client";
+
+import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { AppShell } from "../components/shell";
 import { FlowStepper } from "../components/stepper";
 import { Badge, Button, Card, CardContent, CardHeader, Select, Subhead } from "../components/ui";
+import {
+  IMPORT_CONTEXT_KEY,
+  PREVIEW_META_KEY,
+  PREVIEW_ROWS_KEY,
+  type ImportContext,
+  type ParsedTableCandidate,
+  type PreviewMapping,
+  buildPresetMapping,
+  normalizeRows,
+  safeText,
+} from "../importer";
 
 export default function PreviewPage() {
+  const router = useRouter();
+
+  const [ctx, setCtx] = useState<ImportContext | null>(null);
+  const [mapping, setMapping] = useState<PreviewMapping | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(IMPORT_CONTEXT_KEY);
+      if (!raw) {
+        setError("No uploaded file context found. Please go back to Upload.");
+        return;
+      }
+
+      const parsed = JSON.parse(raw) as ImportContext;
+      setCtx(parsed);
+
+      const first = parsed.candidates?.[0];
+      if (!first) {
+        setError("No table candidates found.");
+        return;
+      }
+
+      setMapping(buildPresetMapping(parsed, first));
+    } catch {
+      setError("Failed to load preview context.");
+    }
+  }, []);
+
+  const candidate = useMemo<ParsedTableCandidate | null>(() => {
+    if (!ctx || !mapping) return null;
+    return ctx.candidates.find((c) => c.id === mapping.candidateId) || ctx.candidates[0] || null;
+  }, [ctx, mapping]);
+
+  const normalizedRows = useMemo(() => {
+    if (!ctx || !mapping || !candidate) return [];
+    return normalizeRows(ctx, candidate, mapping);
+  }, [ctx, mapping, candidate]);
+
+  function patchMapping<K extends keyof PreviewMapping>(key: K, value: PreviewMapping[K]) {
+    if (!mapping) return;
+    setMapping({ ...mapping, [key]: value });
+  }
+
+  function toggleTextColumn(col: string) {
+    if (!mapping) return;
+    const exists = mapping.textColumns.includes(col);
+    patchMapping(
+      "textColumns",
+      exists ? mapping.textColumns.filter((x) => x !== col) : [...mapping.textColumns, col]
+    );
+  }
+
+  function applyTemplate(template: PreviewMapping["bankTemplate"]) {
+    if (!ctx || !candidate) return;
+
+    const next = buildPresetMapping(ctx, candidate);
+    next.bankTemplate = template;
+
+    if (template === "split_generic") {
+      next.amountMode = "split";
+      next.signMode = "debit_positive";
+    } else if (template === "ubs") {
+      next.dropSummaryRows = true;
+    } else if (template === "clientis") {
+      next.amountMode = "single";
+      next.signMode = "debit_positive";
+    } else if (template === "acrevis") {
+      next.amountMode = "single";
+    }
+
+    setMapping(next);
+  }
+
+  function onCandidateChange(nextCandidateId: string) {
+    if (!ctx) return;
+    const nextCandidate = ctx.candidates.find((c) => c.id === nextCandidateId);
+    if (!nextCandidate) return;
+
+    const next = buildPresetMapping(ctx, nextCandidate);
+
+    // Preserve chosen template when switching candidates if possible
+    if (mapping) {
+      next.bankTemplate = mapping.bankTemplate;
+    }
+
+    setMapping(next);
+  }
+
+  function goCleanup() {
+    if (!ctx || !mapping || !normalizedRows.length) return;
+
+    sessionStorage.setItem(PREVIEW_ROWS_KEY, JSON.stringify(normalizedRows));
+    sessionStorage.setItem(
+      PREVIEW_META_KEY,
+      JSON.stringify({
+        fileName: ctx.fileName,
+        fileType: ctx.fileType,
+        bankAccount: ctx.bankAccount,
+        vatMode: ctx.vatMode,
+        createdAt: new Date().toISOString(),
+        mapping,
+      })
+    );
+
+    router.push("/cleanup");
+  }
+
+  if (error) {
+    return (
+      <AppShell active="Upload Files">
+        <div className="mb-8">
+          <FlowStepper active="Preview" />
+        </div>
+        <div className="rounded-xl border border-pink-200 bg-pink-50 p-4 text-sm text-pink-700">
+          {error}
+        </div>
+        <div className="mt-4">
+          <Button onClick={() => router.push("/upload")}>← Back to Upload</Button>
+        </div>
+      </AppShell>
+    );
+  }
+
+  // Safe initial render for Next build / prerender
+  if (!ctx || !mapping || !candidate) {
+    return (
+      <AppShell active="Upload Files">
+        <div className="mb-6">
+          <div className="text-3xl font-semibold">Preview & Column Mapping</div>
+          <Subhead>Loading preview context…</Subhead>
+        </div>
+
+        <div className="mb-8">
+          <FlowStepper active="Preview" />
+        </div>
+
+        <div className="rounded-xl border border-[color:var(--bp-border)] bg-white p-6 text-sm text-slate-500">
+          Waiting for uploaded file context. If this persists, go back to Upload.
+        </div>
+
+        <div className="mt-4">
+          <Button onClick={() => router.push("/upload")}>← Back to Upload</Button>
+        </div>
+      </AppShell>
+    );
+  }
+
   return (
     <AppShell active="Upload Files">
       <div className="mb-6">
-        <div className="text-3xl font-semibold">Upload Transaction Files</div>
-        <Subhead>Process CSV, XLSX, PDF, and CAMT.053 files for Bexio integration</Subhead>
+        <div className="text-3xl font-semibold">Preview & Column Mapping</div>
+        <Subhead>
+          Choose the right candidate, then map date, text, amount, and currency before Cleanup.
+        </Subhead>
       </div>
 
       <div className="mb-8">
         <FlowStepper active="Preview" />
       </div>
 
-      <div className="mb-4 flex items-center gap-2 text-sm font-semibold">
-        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-[color:var(--bp-border)] bg-white">◎</span>
-        Data Preview & Column Mapping
-      </div>
-
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-[360px_1fr]">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-[420px_1fr]">
         <Card>
           <CardHeader>
-            <div className="text-sm font-semibold">Column Mapping</div>
-            <Subhead>Map your data columns to the required fields</Subhead>
+            <div className="text-sm font-semibold">Mapping Wizard</div>
+            <Subhead>Flexible mapping for different bank formats.</Subhead>
           </CardHeader>
+
           <CardContent className="grid gap-4">
             <div className="grid gap-2">
-              <div className="text-xs font-semibold text-slate-600">Date Column</div>
-              <Select defaultValue="date">
-                <option value="date">Date (2025-01-15)</option>
+              <div className="text-xs font-semibold text-slate-600">Table Candidate</div>
+              <Select value={mapping.candidateId} onChange={(e) => onCandidateChange(e.target.value)}>
+                {ctx.candidates.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label}
+                  </option>
+                ))}
+              </Select>
+              <div className="text-xs text-slate-500">{candidate.reason}</div>
+            </div>
+
+            <div className="grid gap-2">
+              <div className="text-xs font-semibold text-slate-600">Bank Template</div>
+              <Select
+                value={mapping.bankTemplate}
+                onChange={(e) =>
+                  applyTemplate(e.target.value as PreviewMapping["bankTemplate"])
+                }
+              >
+                <option value="generic">Generic</option>
+                <option value="ubs">UBS / split + Einzelbetrag fallback</option>
+                <option value="clientis">Clientis / headerless export</option>
+                <option value="acrevis">Acrevis</option>
+                <option value="split_generic">Generic split debit/credit</option>
               </Select>
             </div>
 
             <div className="grid gap-2">
-              <div className="text-xs font-semibold text-slate-600">Amount Column</div>
-              <Select defaultValue="amount">
-                <option value="amount">Amount (5000.00)</option>
+              <div className="text-xs font-semibold text-slate-600">Date Column</div>
+              <Select
+                value={mapping.dateColumn}
+                onChange={(e) => patchMapping("dateColumn", e.target.value)}
+              >
+                <option value="">— select —</option>
+                {candidate.headers.map((h) => (
+                  <option key={h} value={h}>
+                    {h}
+                  </option>
+                ))}
+              </Select>
+            </div>
+
+            <div className="grid gap-2">
+              <div className="text-xs font-semibold text-slate-600">Currency Column (optional)</div>
+              <Select
+                value={mapping.currencyColumn}
+                onChange={(e) => patchMapping("currencyColumn", e.target.value)}
+              >
+                <option value="">— none (default CHF) —</option>
+                {candidate.headers.map((h) => (
+                  <option key={h} value={h}>
+                    {h}
+                  </option>
+                ))}
               </Select>
             </div>
 
             <div className="grid gap-2">
               <div className="text-xs font-semibold text-slate-600">Posting Text Columns</div>
-              <Subhead>Select one or more columns to combine for posting text</Subhead>
-
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" /> Date <span className="text-xs text-slate-500">(2025-01-15)</span>
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" defaultChecked /> Description{" "}
-                <span className="text-xs text-slate-500">(SALARY PAYMENT COMPANY ABC)</span>
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" /> Reference <span className="text-xs text-slate-500">(SAL001)</span>
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" /> Amount <span className="text-xs text-slate-500">(5000.00)</span>
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" /> Balance <span className="text-xs text-slate-500">(15000.00)</span>
-              </label>
+              <div className="max-h-40 overflow-auto rounded-xl border border-[color:var(--bp-border)] p-3">
+                {candidate.headers.map((h) => (
+                  <label key={h} className="mb-2 flex items-center gap-2 text-sm last:mb-0">
+                    <input
+                      type="checkbox"
+                      checked={mapping.textColumns.includes(h)}
+                      onChange={() => toggleTextColumn(h)}
+                    />
+                    <span>{h}</span>
+                    <span className="text-xs text-slate-500">
+                      ({safeText(candidate.rows?.[0]?.[h] || "") || "—"})
+                    </span>
+                  </label>
+                ))}
+              </div>
             </div>
 
-            <Button className="w-full">Continue to Text Cleanup →</Button>
+            <div className="grid gap-2">
+              <div className="text-xs font-semibold text-slate-600">Amount Structure</div>
+              <div className="flex flex-col gap-2 text-sm">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="amount_mode"
+                    checked={mapping.amountMode === "single"}
+                    onChange={() => patchMapping("amountMode", "single")}
+                  />
+                  Single signed amount column
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="amount_mode"
+                    checked={mapping.amountMode === "split"}
+                    onChange={() => patchMapping("amountMode", "split")}
+                  />
+                  Split columns (Belastung / Gutschrift)
+                </label>
+              </div>
+            </div>
+
+            {mapping.amountMode === "single" ? (
+              <>
+                <div className="grid gap-2">
+                  <div className="text-xs font-semibold text-slate-600">Amount Column</div>
+                  <Select
+                    value={mapping.amountColumn}
+                    onChange={(e) => patchMapping("amountColumn", e.target.value)}
+                  >
+                    <option value="">— select —</option>
+                    {candidate.headers.map((h) => (
+                      <option key={h} value={h}>
+                        {h}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+
+                <div className="grid gap-2">
+                  <div className="text-xs font-semibold text-slate-600">Sign Handling</div>
+                  <Select
+                    value={mapping.signMode}
+                    onChange={(e) =>
+                      patchMapping(
+                        "signMode",
+                        e.target.value as PreviewMapping["signMode"]
+                      )
+                    }
+                  >
+                    <option value="as_is">Use sign as-is</option>
+                    <option value="debit_positive">Positive values are outflows</option>
+                    <option value="invert">Invert all signs</option>
+                  </Select>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="grid gap-2">
+                  <div className="text-xs font-semibold text-slate-600">Belastung (outflow)</div>
+                  <Select
+                    value={mapping.debitColumn}
+                    onChange={(e) => patchMapping("debitColumn", e.target.value)}
+                  >
+                    <option value="">— select —</option>
+                    {candidate.headers.map((h) => (
+                      <option key={h} value={h}>
+                        {h}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+
+                <div className="grid gap-2">
+                  <div className="text-xs font-semibold text-slate-600">Gutschrift (inflow)</div>
+                  <Select
+                    value={mapping.creditColumn}
+                    onChange={(e) => patchMapping("creditColumn", e.target.value)}
+                  >
+                    <option value="">— select —</option>
+                    {candidate.headers.map((h) => (
+                      <option key={h} value={h}>
+                        {h}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+
+                <div className="grid gap-2">
+                  <div className="text-xs font-semibold text-slate-600">
+                    Fallback Amount (optional)
+                  </div>
+                  <Select
+                    value={mapping.fallbackAmountColumn}
+                    onChange={(e) => patchMapping("fallbackAmountColumn", e.target.value)}
+                  >
+                    <option value="">— none —</option>
+                    {candidate.headers.map((h) => (
+                      <option key={h} value={h}>
+                        {h}
+                      </option>
+                    ))}
+                  </Select>
+                  <div className="text-xs text-slate-500">
+                    Useful for UBS Sammelbuchungen where child rows use Einzelbetrag.
+                  </div>
+                </div>
+              </>
+            )}
+
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={mapping.dropSummaryRows}
+                onChange={(e) => patchMapping("dropSummaryRows", e.target.checked)}
+              />
+              Drop summary booking rows (e.g. Sammelauftrag parent row)
+            </label>
+
+            <Button className="w-full" onClick={goCleanup} disabled={!normalizedRows.length}>
+              Continue to Cleanup →
+            </Button>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <div className="text-sm font-semibold">Data Preview</div>
-            <Subhead>Preview of your uploaded data (5 rows total)</Subhead>
+            <div className="text-sm font-semibold">Normalized Preview</div>
+            <Subhead>
+              {normalizedRows.length} rows after mapping. This is what goes into Cleanup.
+            </Subhead>
           </CardHeader>
+
           <CardContent>
+            <div className="mb-3 flex flex-wrap gap-2 text-xs">
+              <Badge variant="blue">{ctx.fileType.toUpperCase()}</Badge>
+              <Badge variant="pink">{mapping.bankTemplate}</Badge>
+              <Badge variant="blue">{mapping.amountMode}</Badge>
+            </div>
+
             <div className="overflow-auto rounded-xl border border-[color:var(--bp-border)] bg-white">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-slate-600">
                   <tr>
                     <th className="p-3 text-left">Date</th>
                     <th className="p-3 text-left">Description</th>
-                    <th className="p-3 text-left">Reference</th>
                     <th className="p-3 text-left">Amount</th>
-                    <th className="p-3 text-left">Balance</th>
+                    <th className="p-3 text-left">Currency</th>
                     <th className="p-3 text-left">Type</th>
                   </tr>
                 </thead>
                 <tbody className="text-slate-700">
-                  {[
-                    ["2025-01-15", "SALARY PAYMENT COMPANY ABC", "SAL001", "5000.00", "15000.00", "CREDIT"],
-                    ["2025-01-15", "OFFICE RENT MONTHLY PAYMENT", "RENT001", "-2500.00", "12500.00", "DEBIT"],
-                    ["2025-01-16", "INVOICE PAYMENT CLIENT XYZ", "INV001", "1200.00", "13700.00", "CREDIT"],
-                    ["2025-01-16", "UTILITIES ELECTRICITY BILL", "UTIL001", "-350.00", "13350.00", "DEBIT"],
-                    ["2025-01-17", "CONSULTING SERVICES PAYMENT", "CONS001", "2800.00", "16150.00", "CREDIT"],
-                  ].map((r) => (
-                    <tr key={r[2]} className="border-t border-[color:var(--bp-border)]">
-                      <td className="p-3">{r[0]}</td>
-                      <td className="p-3">{r[1]}</td>
-                      <td className="p-3">{r[2]}</td>
+                  {normalizedRows.slice(0, 25).map((r) => (
+                    <tr key={r.id} className="border-t border-[color:var(--bp-border)]">
+                      <td className="p-3">{r.date || "—"}</td>
+                      <td className="p-3">{r.description || "—"}</td>
                       <td className="p-3">
-                        <Badge variant="pink">{r[3]}</Badge>
+                        <Badge variant="pink">{r.amount.toFixed(2)}</Badge>
                       </td>
-                      <td className="p-3">{r[4]}</td>
-                      <td className="p-3">{r[5]}</td>
+                      <td className="p-3">{r.currency || "CHF"}</td>
+                      <td className="p-3">
+                        {r.direction === "CRDT" ? (
+                          <Badge variant="blue">CRDT</Badge>
+                        ) : (
+                          <Badge variant="pink">DBIT</Badge>
+                        )}
+                      </td>
                     </tr>
                   ))}
+                  {!normalizedRows.length ? (
+                    <tr>
+                      <td colSpan={5} className="p-6 text-center text-slate-500">
+                        No rows produced yet. Adjust the mapping on the left.
+                      </td>
+                    </tr>
+                  ) : null}
                 </tbody>
               </table>
             </div>
