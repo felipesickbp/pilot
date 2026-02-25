@@ -897,11 +897,12 @@ export function normalizeRows(
   const out: NormalizedRow[] = [];
 
   let currentSummarySign: 1 | -1 | null = null;
+  let currentSummaryDate = "";
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
 
-    const date = mapping.dateColumn ? isoFromMaybeDate(row[mapping.dateColumn] || "") : "";
+    const parsedDate = mapping.dateColumn ? isoFromMaybeDate(row[mapping.dateColumn] || "") : "";
 
     const descParts = mapping.textColumns
       .map((col) => safeText(row[col] || ""))
@@ -916,6 +917,10 @@ export function normalizeRows(
 
     const isSummary = isLikelySummaryBooking(description);
 
+    if (isSummary && parsedDate) {
+      currentSummaryDate = parsedDate;
+    }
+
     if (isSummary && amount !== 0) {
       currentSummarySign = amount > 0 ? 1 : -1;
     }
@@ -923,6 +928,11 @@ export function normalizeRows(
     if (mapping.dropSummaryRows && isSummary) {
       continue;
     }
+
+    // UBS exports often only carry booking date on the Sammelbuchung parent row.
+    // If we drop the parent row, inherit its date for child rows.
+    const date =
+      parsedDate || (mapping.bankTemplate === "ubs" && currentSummaryDate ? currentSummaryDate : "");
 
     if (!date && !description && !amount) continue;
 
