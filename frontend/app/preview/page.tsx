@@ -12,6 +12,7 @@ import {
   type ImportContext,
   type ParsedTableCandidate,
   type PreviewMapping,
+  buildMappingForTemplate,
   buildPresetMapping,
   normalizeRows,
   safeText,
@@ -73,22 +74,7 @@ export default function PreviewPage() {
 
   function applyTemplate(template: PreviewMapping["bankTemplate"]) {
     if (!ctx || !candidate) return;
-
-    const next = buildPresetMapping(ctx, candidate);
-    next.bankTemplate = template;
-
-    if (template === "split_generic") {
-      next.amountMode = "split";
-      next.signMode = "debit_positive";
-    } else if (template === "ubs") {
-      next.dropSummaryRows = true;
-    } else if (template === "clientis") {
-      next.amountMode = "single";
-      next.signMode = "debit_positive";
-    } else if (template === "acrevis") {
-      next.amountMode = "single";
-    }
-
+    const next = buildMappingForTemplate(ctx, candidate, template);
     setMapping(next);
   }
 
@@ -97,15 +83,69 @@ export default function PreviewPage() {
     const nextCandidate = ctx.candidates.find((c) => c.id === nextCandidateId);
     if (!nextCandidate) return;
 
-    const next = buildPresetMapping(ctx, nextCandidate);
-
-    // Preserve chosen template when switching candidates if possible
-    if (mapping) {
-      next.bankTemplate = mapping.bankTemplate;
-    }
-
+    const template = mapping?.bankTemplate || buildPresetMapping(ctx, nextCandidate).bankTemplate;
+    const next = buildMappingForTemplate(ctx, nextCandidate, template);
     setMapping(next);
   }
+
+  const validation = useMemo(() => {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    if (!mapping) return { errors, warnings };
+
+    if (!mapping.dateColumn) errors.push("Select a date column.");
+    if (!mapping.textColumns.length) errors.push("Select at least one posting text column.");
+
+    if (mapping.amountMode === "single") {
+      if (!mapping.amountColumn) errors.push("Select an amount column.");
+    } else {
+      if (!mapping.debitColumn && !mapping.creditColumn && !mapping.fallbackAmountColumn) {
+        errors.push("For split mode, map debit and/or credit, or provide a fallback amount column.");
+      }
+    }
+
+    if (!normalizedRows.length) {
+      errors.push("Mapping currently produces no rows.");
+      return { errors, warnings };
+    }
+
+    const dateCount = normalizedRows.filter((r) => !!safeText(r.date)).length;
+    const amountCount = normalizedRows.filter((r) => Number(r.amount) !== 0).length;
+    const descCount = normalizedRows.filter(
+      (r) => !!safeText(r.description) && !/^Row \d+$/i.test(safeText(r.description))
+    ).length;
+
+    if (dateCount === 0) errors.push("No parsed dates found in normalized rows.");
+    if (amountCount === 0) errors.push("No non-zero amounts found in normalized rows.");
+    if (descCount === 0) errors.push("No usable descriptions found in normalized rows.");
+
+    const dateRate = dateCount / normalizedRows.length;
+    const amountRate = amountCount / normalizedRows.length;
+    if (dateRate < 0.7) warnings.push(`Only ${Math.round(dateRate * 100)}% rows have a parsed date.`);
+    if (amountRate < 0.7) warnings.push(`Only ${Math.round(amountRate * 100)}% rows have a non-zero amount.`);
+
+    const ambiguousCount = normalizedRows.filter((r) => r.amountDiagnostics?.ambiguousBothSides).length;
+    const fallbackCount = normalizedRows.filter((r) => r.amountDiagnostics?.usedFallback).length;
+    const inheritedCount = normalizedRows.filter((r) => r.amountDiagnostics?.summaryInheritedSign).length;
+    if (ambiguousCount > 0) {
+      warnings.push(
+        `${ambiguousCount} row(s) had both debit and credit values; amount was derived by netting credit - debit.`
+      );
+    }
+    if (fallbackCount > 0) {
+      warnings.push(`${fallbackCount} row(s) used fallback amount column.`);
+    }
+    if (inheritedCount > 0) {
+      warnings.push(
+        `${inheritedCount} UBS fallback row(s) inherited sign from prior summary booking.`
+      );
+    }
+
+    return { errors, warnings };
+  }, [mapping, normalizedRows]);
+
+  const canContinue = validation.errors.length === 0 && normalizedRows.length > 0;
 
   function goCleanup() {
     if (!ctx || !mapping || !normalizedRows.length) return;
@@ -385,7 +425,23 @@ export default function PreviewPage() {
               Drop summary booking rows (e.g. Sammelauftrag parent row)
             </label>
 
-            <Button className="w-full" onClick={goCleanup} disabled={!normalizedRows.length}>
+            {validation.errors.length > 0 ? (
+              <div className="rounded-xl border border-pink-200 bg-pink-50 p-3 text-xs text-pink-700">
+                {validation.errors.map((e, i) => (
+                  <div key={`${e}-${i}`}>• {e}</div>
+                ))}
+              </div>
+            ) : null}
+
+            {validation.warnings.length > 0 ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                {validation.warnings.map((w, i) => (
+                  <div key={`${w}-${i}`}>• {w}</div>
+                ))}
+              </div>
+            ) : null}
+
+            <Button className="w-full" onClick={goCleanup} disabled={!canContinue}>
               Continue to Cleanup →
             </Button>
           </CardContent>
@@ -415,6 +471,7 @@ export default function PreviewPage() {
                     <th className="p-3 text-left">Amount</th>
                     <th className="p-3 text-left">Currency</th>
                     <th className="p-3 text-left">Type</th>
+                    <th className="p-3 text-left">Amount Rule</th>
                   </tr>
                 </thead>
                 <tbody className="text-slate-700">
@@ -433,11 +490,29 @@ export default function PreviewPage() {
                           <Badge variant="pink">DBIT</Badge>
                         )}
                       </td>
+                      <td className="p-3 text-xs">
+                        <div className="flex flex-wrap gap-1">
+                          {r.amountDiagnostics?.ambiguousBothSides ? (
+                            <Badge variant="pink">ambiguous split</Badge>
+                          ) : null}
+                          {r.amountDiagnostics?.usedDebit ? <Badge variant="blue">debit</Badge> : null}
+                          {r.amountDiagnostics?.usedCredit ? <Badge variant="blue">credit</Badge> : null}
+                          {r.amountDiagnostics?.usedFallback ? <Badge variant="blue">fallback</Badge> : null}
+                          {r.amountDiagnostics?.summaryInheritedSign ? (
+                            <Badge variant="pink">summary sign</Badge>
+                          ) : null}
+                          {!r.amountDiagnostics?.usedDebit &&
+                          !r.amountDiagnostics?.usedCredit &&
+                          !r.amountDiagnostics?.usedFallback ? (
+                            <span className="text-slate-400">direct/single</span>
+                          ) : null}
+                        </div>
+                      </td>
                     </tr>
                   ))}
                   {!normalizedRows.length ? (
                     <tr>
-                      <td colSpan={5} className="p-6 text-center text-slate-500">
+                      <td colSpan={6} className="p-6 text-center text-slate-500">
                         No rows produced yet. Adjust the mapping on the left.
                       </td>
                     </tr>

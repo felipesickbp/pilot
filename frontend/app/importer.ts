@@ -46,7 +46,30 @@ export type NormalizedRow = {
   sollAccount: string;
   habenAccount: string;
   vatCode: string;
+  amountDiagnostics?: AmountDiagnostics;
   originalRow?: Record<string, string>;
+};
+
+export type AmountDiagnostics = {
+  usedDebit: boolean;
+  usedCredit: boolean;
+  usedFallback: boolean;
+  ambiguousBothSides: boolean;
+  summaryInheritedSign: boolean;
+};
+
+export type CleanupRuleOptions = {
+  stripBookingWords: boolean;
+  stripIbanRefs: boolean;
+  stripAddressBits: boolean;
+  titleCase: boolean;
+};
+
+export type CleanupRuleKey = keyof CleanupRuleOptions;
+
+export type CleanupResult = {
+  text: string;
+  changedRules: CleanupRuleKey[];
 };
 
 export const IMPORT_CONTEXT_KEY = "bp_pilot_import_context_v1";
@@ -218,6 +241,112 @@ function buildCandidate(
 }
 
 function parseCsvCandidates(text: string): ParsedTableCandidate[] {
+  try {
+    const enhanced = parseCsvCandidatesEnhanced(text);
+    if (enhanced.length) return enhanced;
+  } catch {}
+  return parseCsvCandidatesLegacy(text);
+}
+
+function parseCsvCandidatesEnhanced(text: string): ParsedTableCandidate[] {
+  const cleaned = text.replace(/^\uFEFF/, "");
+  const lines = cleaned.split(/\r?\n/);
+  const preferred = detectDelimiter(cleaned);
+  const delimiters = [preferred, ";", ",", "\t", "|"].filter((d, i, arr) => arr.indexOf(d) === i);
+
+  const candidates: ParsedTableCandidate[] = [];
+  const seen = new Set<string>();
+
+  for (const delimiter of delimiters) {
+    for (let headerRow = 0; headerRow < Math.min(lines.length, 32); headerRow++) {
+      const line = lines[headerRow];
+      if (!line?.trim()) continue;
+
+      const headers = splitCsvLine(line, delimiter);
+      const nonEmptyHeaders = headers.filter((h) => h.trim());
+      if (nonEmptyHeaders.length < 2) continue;
+
+      const bodyLines = lines.slice(headerRow + 1).filter((l) => l.trim()).slice(0, 160);
+      if (!bodyLines.length) continue;
+
+      const rows: Record<string, string>[] = [];
+      for (const bodyLine of bodyLines) {
+        const cells = splitCsvLine(bodyLine, delimiter);
+        const obj: Record<string, string> = {};
+        for (let i = 0; i < headers.length; i++) {
+          const key = headers[i] || `Column ${i + 1}`;
+          obj[key] = cells[i] ?? "";
+        }
+        if (Object.values(obj).some((v) => safeText(v))) rows.push(obj);
+      }
+
+      if (!rows.length) continue;
+
+      const key = `${delimiter}__${headers.map(normalizeHeader).join("|")}__${headerRow}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const candidate = buildCandidate(
+        String(candidates.length + 1),
+        "csv",
+        headerRow,
+        headers,
+        rows
+      );
+      const delimLabel = delimiter === "\t" ? "TAB" : delimiter;
+      candidate.label = `${candidate.label} · delim ${delimLabel}`;
+      candidate.reason = `${candidate.reason} (delimiter ${delimLabel})`;
+      candidates.push(candidate);
+    }
+
+    // headerless candidate for formats like Clientis
+    const firstRows = lines.filter((l) => l.trim()).slice(0, 100);
+    if (firstRows.length >= 3) {
+      const parsed = firstRows.map((l) => splitCsvLine(l, delimiter));
+      const widths = parsed.map((r) => r.length);
+      const uniqueWidths = Array.from(new Set(widths));
+      const mostCommonWidth = uniqueWidths
+        .map((w) => ({ w, c: widths.filter((x) => x === w).length }))
+        .sort((a, b) => b.c - a.c)[0]?.w;
+
+      if (mostCommonWidth && mostCommonWidth >= 4) {
+        const stableRows = parsed.filter((r) => r.length === mostCommonWidth);
+        if (stableRows.length >= 3) {
+          const headers = Array.from({ length: mostCommonWidth }, (_, i) => `Column ${i + 1}`);
+          const rows = stableRows.map((cells) => {
+            const obj: Record<string, string> = {};
+            headers.forEach((h, i) => {
+              obj[h] = cells[i] ?? "";
+            });
+            return obj;
+          });
+
+          const firstCell = safeText(rows[0]?.["Column 1"]);
+          const key = `${delimiter}__headerless__${mostCommonWidth}`;
+          if (!seen.has(key) && /\d{2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2}/.test(firstCell)) {
+            seen.add(key);
+            const candidate = buildCandidate(
+              String(candidates.length + 1),
+              "csv",
+              0,
+              headers,
+              rows,
+              "Detected headerless export (likely pre-normalized rows)"
+            );
+            const delimLabel = delimiter === "\t" ? "TAB" : delimiter;
+            candidate.label = `${candidate.label} · delim ${delimLabel}`;
+            candidates.push(candidate);
+          }
+        }
+      }
+    }
+  }
+
+  candidates.sort((a, b) => b.confidence - a.confidence);
+  return candidates.slice(0, 8);
+}
+
+function parseCsvCandidatesLegacy(text: string): ParsedTableCandidate[] {
   const cleaned = text.replace(/^\uFEFF/, "");
   const delimiter = detectDelimiter(cleaned);
   const lines = cleaned.split(/\r?\n/);
@@ -309,6 +438,76 @@ function parseCsvCandidates(text: string): ParsedTableCandidate[] {
 }
 
 function parseExcelCandidates(fileData: ArrayBuffer): ParsedTableCandidate[] {
+  try {
+    const enhanced = parseExcelCandidatesEnhanced(fileData);
+    if (enhanced.length) return enhanced;
+  } catch {}
+  return parseExcelCandidatesLegacy(fileData);
+}
+
+function parseExcelCandidatesEnhanced(fileData: ArrayBuffer): ParsedTableCandidate[] {
+  const wb = XLSX.read(fileData, { type: "array" });
+  const sheetNames = wb.SheetNames || [];
+  if (!sheetNames.length) throw new Error("Excel file has no sheets.");
+
+  const candidates: ParsedTableCandidate[] = [];
+  const seen = new Set<string>();
+
+  for (const sheetName of sheetNames.slice(0, 5)) {
+    const sheet = wb.Sheets[sheetName];
+    if (!sheet) continue;
+
+    const matrix = XLSX.utils.sheet_to_json<(string | number)[]>(sheet, {
+      header: 1,
+      blankrows: false,
+      defval: "",
+    }) as (string | number)[][];
+
+    for (let headerRow = 0; headerRow < Math.min(matrix.length, 32); headerRow++) {
+      const rawHeaders = matrix[headerRow] || [];
+      const headers = rawHeaders.map((x) => safeText(String(x ?? "")));
+      const nonEmptyHeaders = headers.filter(Boolean);
+      if (nonEmptyHeaders.length < 2) continue;
+
+      const body = matrix.slice(headerRow + 1, headerRow + 161);
+      const rows: Record<string, string>[] = [];
+
+      for (const row of body) {
+        const obj: Record<string, string> = {};
+        let any = false;
+        for (let i = 0; i < headers.length; i++) {
+          const key = headers[i] || `Column ${i + 1}`;
+          const val = safeText(String(row?.[i] ?? ""));
+          obj[key] = val;
+          if (val) any = true;
+        }
+        if (any) rows.push(obj);
+      }
+
+      if (!rows.length) continue;
+
+      const key = `${sheetName}__${headers.map(normalizeHeader).join("|")}__${headerRow}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const candidate = buildCandidate(
+        String(candidates.length + 1),
+        "excel",
+        headerRow,
+        headers,
+        rows
+      );
+      candidate.label = `${candidate.label} · sheet ${sheetName}`;
+      candidate.reason = `${candidate.reason} (sheet ${sheetName})`;
+      candidates.push(candidate);
+    }
+  }
+
+  candidates.sort((a, b) => b.confidence - a.confidence);
+  return candidates.slice(0, 8);
+}
+
+function parseExcelCandidatesLegacy(fileData: ArrayBuffer): ParsedTableCandidate[] {
   const wb = XLSX.read(fileData, { type: "array" });
   const firstSheetName = wb.SheetNames[0];
   if (!firstSheetName) throw new Error("Excel file has no sheets.");
@@ -507,7 +706,7 @@ export function guessHeader(headers: string[], needles: string[]): string {
   return "";
 }
 
-export function buildPresetMapping(ctx: ImportContext, candidate: ParsedTableCandidate): PreviewMapping {
+function detectBankTemplate(candidate: ParsedTableCandidate): PreviewMapping["bankTemplate"] {
   const headers = candidate.headers;
 
   const isHeaderless = headers.every((h) => /^Column \d+$/.test(h));
@@ -520,7 +719,15 @@ export function buildPresetMapping(ctx: ImportContext, candidate: ParsedTableCan
   if (looksUBS) bankTemplate = "ubs";
   else if (isHeaderless) bankTemplate = "clientis";
   else if (looksAcrevis) bankTemplate = "acrevis";
+  return bankTemplate;
+}
 
+export function buildMappingForTemplate(
+  ctx: ImportContext,
+  candidate: ParsedTableCandidate,
+  template: PreviewMapping["bankTemplate"]
+): PreviewMapping {
+  const headers = candidate.headers;
   let dateColumn = "";
   let currencyColumn = "";
   let amountMode: PreviewMapping["amountMode"] = "single";
@@ -532,7 +739,7 @@ export function buildPresetMapping(ctx: ImportContext, candidate: ParsedTableCan
   let textColumns: string[] = [];
   let dropSummaryRows = true;
 
-  if (bankTemplate === "ubs") {
+  if (template === "ubs") {
     dateColumn =
       guessHeader(headers, ["buchungsdatum", "valutadatum", "abschlussdatum"]) || headers[0] || "";
     currencyColumn = guessHeader(headers, ["wahrung", "waehrung", "currency", "ccy"]);
@@ -547,7 +754,7 @@ export function buildPresetMapping(ctx: ImportContext, candidate: ParsedTableCan
         ["Beschreibung1", "Beschreibung2", "Beschreibung3"].includes(h)
       );
     }
-  } else if (bankTemplate === "clientis") {
+  } else if (template === "clientis") {
     dateColumn = "Column 1";
     textColumns = ["Column 2"];
     amountMode = "single";
@@ -555,7 +762,7 @@ export function buildPresetMapping(ctx: ImportContext, candidate: ParsedTableCan
     currencyColumn = "Column 4";
     signMode = "debit_positive";
     dropSummaryRows = false;
-  } else if (bankTemplate === "acrevis") {
+  } else if (template === "acrevis") {
     dateColumn = guessHeader(headers, ["datum", "valuta", "date"]);
     textColumns = [guessHeader(headers, ["buchungstext", "beschreibung", "text"])].filter(Boolean);
     amountMode = "single";
@@ -591,7 +798,7 @@ export function buildPresetMapping(ctx: ImportContext, candidate: ParsedTableCan
 
   return {
     candidateId: candidate.id,
-    bankTemplate,
+    bankTemplate: template,
     dateColumn,
     currencyColumn,
     amountMode,
@@ -605,9 +812,79 @@ export function buildPresetMapping(ctx: ImportContext, candidate: ParsedTableCan
   };
 }
 
+export function buildPresetMapping(ctx: ImportContext, candidate: ParsedTableCandidate): PreviewMapping {
+  const template = detectBankTemplate(candidate);
+  return buildMappingForTemplate(ctx, candidate, template);
+}
+
 function isLikelySummaryBooking(text: string): boolean {
   const s = safeText(text).toLowerCase();
   return s.includes("sammelauftrag") || s.includes("sammelbuchung") || s.includes("sammelauftr");
+}
+
+function applySignMode(raw: number, signMode: PreviewMapping["signMode"]): number {
+  if (signMode === "invert") return raw * -1;
+  if (signMode === "debit_positive") return raw > 0 ? -Math.abs(raw) : raw;
+  return raw;
+}
+
+function resolveAmount(
+  row: Record<string, string>,
+  mapping: PreviewMapping,
+  currentSummarySign: 1 | -1 | null
+): { amount: number; diagnostics: AmountDiagnostics } {
+  const diagnostics: AmountDiagnostics = {
+    usedDebit: false,
+    usedCredit: false,
+    usedFallback: false,
+    ambiguousBothSides: false,
+    summaryInheritedSign: false,
+  };
+
+  if (mapping.amountMode !== "split") {
+    const raw = mapping.amountColumn ? parseAmountLoose(row[mapping.amountColumn] || "") : 0;
+    return { amount: applySignMode(raw, mapping.signMode), diagnostics };
+  }
+
+  const debit = mapping.debitColumn ? parseAmountLoose(row[mapping.debitColumn] || "") : 0;
+  const credit = mapping.creditColumn ? parseAmountLoose(row[mapping.creditColumn] || "") : 0;
+  const fallback = mapping.fallbackAmountColumn
+    ? parseAmountLoose(row[mapping.fallbackAmountColumn] || "")
+    : 0;
+
+  const hasDebit = debit !== 0;
+  const hasCredit = credit !== 0;
+  const hasFallback = fallback !== 0;
+
+  if (hasDebit && hasCredit) {
+    diagnostics.ambiguousBothSides = true;
+    diagnostics.usedDebit = true;
+    diagnostics.usedCredit = true;
+    const amount = Math.abs(credit) - Math.abs(debit);
+    return { amount, diagnostics };
+  }
+
+  if (hasCredit) {
+    diagnostics.usedCredit = true;
+    return { amount: Math.abs(credit), diagnostics };
+  }
+
+  if (hasDebit) {
+    diagnostics.usedDebit = true;
+    return { amount: -Math.abs(debit), diagnostics };
+  }
+
+  if (hasFallback) {
+    diagnostics.usedFallback = true;
+    if (mapping.bankTemplate === "ubs" && currentSummarySign) {
+      diagnostics.summaryInheritedSign = true;
+      const amount = currentSummarySign > 0 ? Math.abs(fallback) : -Math.abs(fallback);
+      return { amount, diagnostics };
+    }
+    return { amount: applySignMode(fallback, mapping.signMode), diagnostics };
+  }
+
+  return { amount: 0, diagnostics };
 }
 
 export function normalizeRows(
@@ -631,33 +908,7 @@ export function normalizeRows(
       .filter(Boolean);
 
     const description = descParts.join(" | ");
-
-    let amount = 0;
-
-    if (mapping.amountMode === "split") {
-      const debit = mapping.debitColumn ? parseAmountLoose(row[mapping.debitColumn] || "") : 0;
-      const credit = mapping.creditColumn ? parseAmountLoose(row[mapping.creditColumn] || "") : 0;
-      const fallback = mapping.fallbackAmountColumn
-        ? parseAmountLoose(row[mapping.fallbackAmountColumn] || "")
-        : 0;
-
-      if (credit) {
-        amount = Math.abs(credit);
-      } else if (debit) {
-        amount = -Math.abs(debit);
-      } else if (fallback) {
-        if (mapping.bankTemplate === "ubs" && currentSummarySign) {
-          amount = currentSummarySign > 0 ? Math.abs(fallback) : -Math.abs(fallback);
-        } else {
-          amount = mapping.signMode === "debit_positive" ? -Math.abs(fallback) : fallback;
-        }
-      }
-    } else {
-      const raw = mapping.amountColumn ? parseAmountLoose(row[mapping.amountColumn] || "") : 0;
-      if (mapping.signMode === "invert") amount = raw * -1;
-      else if (mapping.signMode === "debit_positive") amount = raw > 0 ? -Math.abs(raw) : raw;
-      else amount = raw;
-    }
+    const { amount, diagnostics } = resolveAmount(row, mapping, currentSummarySign);
 
     const currency = mapping.currencyColumn
       ? safeText(row[mapping.currencyColumn] || "") || "CHF"
@@ -691,6 +942,7 @@ export function normalizeRows(
       sollAccount: amount > 0 ? bankAccount : "",
       habenAccount: amount < 0 ? bankAccount : "",
       vatCode: "",
+      amountDiagnostics: diagnostics,
       originalRow: row,
     });
   }
@@ -702,50 +954,64 @@ function toTitleCase(s: string) {
   return s.toLowerCase().replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
-export function cleanDescription(
+export function cleanDescriptionWithDiagnostics(
   raw: string,
-  opts: {
-    stripBookingWords: boolean;
-    stripIbanRefs: boolean;
-    stripAddressBits: boolean;
-    titleCase: boolean;
-  }
-) {
+  opts: CleanupRuleOptions
+): CleanupResult {
   let s = safeText(raw);
+  const changed = new Set<CleanupRuleKey>();
 
   if (opts.stripBookingWords) {
+    const before = s;
     s = s.replace(
       /^(gutschrift|lastschrift|belastung|kontoübertrag|preis für .*?|saldo dienstleistungspreisabschluss)\b[:\s-]*/i,
       ""
     );
     s = s.replace(/\be-banking-sammelauftrag\b/gi, "");
     s = s.replace(/\be-banking inland \(\*e\)\b/gi, "");
+    if (s !== before) changed.add("stripBookingWords");
   }
 
   if (opts.stripIbanRefs) {
+    const before = s;
     s = s.replace(/\bCH\d{2}[0-9A-Z ]{8,}\b/g, "");
     s = s.replace(/\b(referenz|referenzen|sender referenz|transaktions-nr|zahlungsgrund|qrr):.*$/i, "");
     s = s.replace(/\bKonto-Nr\.?\s*IBAN:.*$/i, "");
+    if (s !== before) changed.add("stripIbanRefs");
   }
 
   if (opts.stripAddressBits) {
+    const before = s;
     s = s.replace(/\b[A-ZÄÖÜa-zäöüß-]+strasse\s+\d+\b/gi, "");
     s = s.replace(/\b\d{4}\s+[A-ZÄÖÜa-zäöüß-]+\b/g, "");
     s = s.replace(/\bkosten:\s*.*$/i, "");
     s = s.replace(/\bCH\s*\|\s*/g, " ");
     s = s.replace(/\b[A-Z]{2}\d{5,}\b/g, "");
-  }
 
-  // Special UBS sender extraction
-  const sender = s.match(/absender:\s*(.*?)(?=\s+(konto-nr|iban|referenz|referenzen|kosten:|ch\d{2}|[0-9]{4}\s))/i);
-  if (sender?.[1]) s = sender[1].trim();
+    // Special UBS sender extraction
+    const sender = s.match(/absender:\s*(.*?)(?=\s+(konto-nr|iban|referenz|referenzen|kosten:|ch\d{2}|[0-9]{4}\s))/i);
+    if (sender?.[1]) s = sender[1].trim();
+    if (s !== before) changed.add("stripAddressBits");
+  }
 
   s = s.replace(/\s{2,}/g, " ").replace(/\s+,/g, ",").trim();
   s = s.replace(/[|;,-]\s*$/g, "").trim();
 
   if (opts.titleCase && /[A-ZÄÖÜ]{4,}/.test(raw || "")) {
+    const before = s;
     s = toTitleCase(s);
+    if (s !== before) changed.add("titleCase");
   }
 
-  return s || "Unbekannte Buchung";
+  return {
+    text: s || "Unbekannte Buchung",
+    changedRules: Array.from(changed),
+  };
+}
+
+export function cleanDescription(
+  raw: string,
+  opts: CleanupRuleOptions
+) {
+  return cleanDescriptionWithDiagnostics(raw, opts).text;
 }
