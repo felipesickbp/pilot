@@ -510,7 +510,7 @@ export default function SpreadsheetPage() {
                     <th className="w-[140px] p-3 text-left">Soll</th>
                     <th className="w-[140px] p-3 text-left">Haben</th>
                     {vatEnabled ? <th className="w-[120px] p-3 text-left">MWST</th> : null}
-                    <th className="w-[90px] p-3 text-left">Aktion</th>
+                    <th className="w-[76px] p-3 text-left">Aktion</th>
                   </tr>
                 </thead>
 
@@ -560,18 +560,13 @@ export default function SpreadsheetPage() {
                           </td>
                         ) : null}
                         <td className="p-3">
-                          <div className="flex items-center gap-1">
-                            {rules.some((rule) => ruleMatches(rule, r)) ? (
-                              <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-sky-200 bg-sky-50 text-sky-700" title="Buchungsregel vorhanden">
-                                <Sparkles className="h-3.5 w-3.5" />
-                              </span>
-                            ) : null}
+                          <div className="flex items-center gap-1 whitespace-nowrap">
                             <Button
                               variant="outline"
                               onClick={() => openRuleModal(r)}
-                              title="Buchungsregel hinzufügen"
+                              title={rules.some((rule) => ruleMatches(rule, r)) ? "Buchungsregel vorhanden (bearbeiten/neu anlegen)" : "Buchungsregel hinzufügen"}
                               aria-label="Buchungsregel hinzufügen"
-                              className="h-7 px-2"
+                              className={`h-7 px-2 ${rules.some((rule) => ruleMatches(rule, r)) ? "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100" : ""}`}
                             >
                               <Sparkles className="h-3.5 w-3.5" />
                             </Button>
