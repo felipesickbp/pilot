@@ -94,33 +94,33 @@ export default function DashboardPage() {
       <div className="grid gap-6">
         <div className="grid grid-cols-1 gap-6 md:grid-cols-4">
           <Stat
-            title="Total Clients"
+            title="Mandanten"
             value={connected ? "1" : "0"}
             note={
               connected
                 ? clientName
-                  ? `Connected bexio client ${clientName}`
-                  : "Connected bexio client"
-                : "No active bexio connection"
+                  ? `Verbundener bexio-Mandant ${clientName}`
+                  : "Verbundener bexio-Mandant"
+                : "Keine aktive bexio-Verbindung"
             }
             icon={<Users className="h-5 w-5" />}
           />
           <Stat
-            title="Processed Files"
+            title="Verarbeitete Dateien"
             value={String(processedFiles)}
-            note="Imported files stored in history"
+            note="Importierte Dateien in der Historie"
             icon={<FileText className="h-5 w-5" />}
           />
           <Stat
-            title="Total Transactions"
+            title="Transaktionen gesamt"
             value={String(totalTransactions)}
-            note="Rows imported via direct posting flow"
+            note="Importierte Zeilen im Buchungsfluss"
             icon={<ListChecks className="h-5 w-5" />}
           />
           <Stat
-            title="Processing Rules"
-            value="Active"
-            note="Cleanup + account/VAT mapping enabled"
+            title="Verarbeitungsregeln"
+            value="Aktiv"
+            note="Bereinigung + Konto-/MWST-Mapping aktiv"
             icon={<Settings className="h-5 w-5" />}
           />
         </div>
@@ -129,15 +129,15 @@ export default function DashboardPage() {
           <Card>
             <CardHeader>
               <div className="text-sm font-semibold">Latest Imports</div>
-              <Subhead>Brief overview. Open History for full details.</Subhead>
+              <Subhead>Kurzüberblick. Für Details die Historie öffnen.</Subhead>
             </CardHeader>
             <CardContent>
-              {loading ? <div className="text-sm text-slate-500">Loading dashboard metrics...</div> : null}
+              {loading ? <div className="text-sm text-slate-500">Dashboard-Kennzahlen werden geladen…</div> : null}
               {!loading && !connected ? (
-                <div className="text-sm text-slate-500">Connect bexio to load import metrics.</div>
+                <div className="text-sm text-slate-500">bexio verbinden, um Import-Kennzahlen zu laden.</div>
               ) : null}
               {!loading && connected && !recent.length ? (
-                <div className="text-sm text-slate-500">No imports yet.</div>
+                <div className="text-sm text-slate-500">Noch keine Importe.</div>
               ) : null}
 
               {!loading && connected && recent.length ? (
@@ -149,13 +149,13 @@ export default function DashboardPage() {
                     >
                       <div className="text-sm font-medium">{formatDate(item.created_at)}</div>
                       <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
-                        <Badge variant="blue">{item.row_count} rows</Badge>
+                        <Badge variant="blue">{item.row_count} Zeilen</Badge>
                         <span className="font-mono">{item.import_id.slice(0, 8)}...</span>
                       </div>
                     </div>
                   ))}
                   <a href="/history" className="text-sm font-medium text-blue-600 hover:text-blue-700">
-                    Open full history →
+                    Ganze Historie öffnen →
                   </a>
                 </div>
               ) : null}
@@ -165,15 +165,15 @@ export default function DashboardPage() {
           <Card>
             <CardHeader>
               <div className="text-sm font-semibold">Quick Actions</div>
-              <Subhead>Common tasks and workflows</Subhead>
+              <Subhead>Häufige Aufgaben und Workflows</Subhead>
             </CardHeader>
             <CardContent className="grid gap-3">
-              <Action title="Upload New File" desc="Process CSV, XLSX, or CAMT.053 files" href="/upload" />
-              <Action title="Manage Posting Rules" desc="Configure automatic account assignments" href="/posting-rules" />
-              <Action title="Direct Import" desc="Paste TSV and send to Bexio" href="/direct-import" />
+              <Action title="Neue Datei hochladen" desc="CSV-, XLSX- oder CAMT.053-Dateien verarbeiten" href="/upload" />
+              <Action title="Buchungsregeln verwalten" desc="Automatische Kontozuordnungen konfigurieren" href="/posting-rules" />
+              <Action title="Direktimport" desc="TSV einfügen und an Bexio senden" href="/direct-import" />
               <div className="pt-2">
                 <a href="/upload" className="block">
-                  <Button className="w-full">Open Upload Flow</Button>
+                  <Button className="w-full">Upload öffnen</Button>
                 </a>
               </div>
             </CardContent>

@@ -124,7 +124,7 @@ export default function DirectImportPage() {
   }
 
   return (
-    <AppShell active="Direct Import">
+    <AppShell active="Direktimport">
       <Card>
         <CardHeader>
           <div className="flex items-start justify-between gap-4">

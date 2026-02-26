@@ -200,7 +200,7 @@ export default function HistoryPage() {
   }, [selected]);
 
   return (
-    <AppShell active="History">
+    <AppShell active="Historie">
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
         <Card className="xl:col-span-7">
           <CardHeader>

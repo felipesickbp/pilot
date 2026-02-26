@@ -19,6 +19,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [theme, setTheme] = useState<"light" | "dark">("light");
 
   useEffect(() => {
     let cancelled = false;
@@ -37,19 +38,36 @@ export default function SettingsPage() {
     };
   }, [apiBase]);
 
+  useEffect(() => {
+    try {
+      const stored = String(localStorage.getItem("bp_theme") || "light");
+      const next = stored === "dark" ? "dark" : "light";
+      setTheme(next);
+      document.documentElement.setAttribute("data-theme", next);
+    } catch {}
+  }, []);
+
+  function onThemeChange(next: "light" | "dark") {
+    setTheme(next);
+    try {
+      localStorage.setItem("bp_theme", next);
+    } catch {}
+    document.documentElement.setAttribute("data-theme", next);
+  }
+
   async function onChangePassword() {
     setError("");
     setSuccess("");
     if (!currentPassword || !newPassword) {
-      setError("Please fill out current and new password.");
+      setError("Bitte aktuelles und neues Passwort ausfüllen.");
       return;
     }
     if (newPassword.length < 10) {
-      setError("Password must be at least 10 characters.");
+      setError("Passwort muss mindestens 10 Zeichen lang sein.");
       return;
     }
     if (newPassword !== confirmPassword) {
-      setError("New password confirmation does not match.");
+      setError("Die Passwort-Bestätigung stimmt nicht überein.");
       return;
     }
 
@@ -68,13 +86,13 @@ export default function SettingsPage() {
         }),
       });
       const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data?.detail || "Could not change password.");
+      if (!r.ok) throw new Error(data?.detail || "Passwort konnte nicht geändert werden.");
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-      setSuccess("Password changed successfully.");
+      setSuccess("Passwort erfolgreich geändert.");
     } catch (e: any) {
-      setError(e?.message || "Could not change password.");
+      setError(e?.message || "Passwort konnte nicht geändert werden.");
     } finally {
       setLoading(false);
     }
@@ -83,14 +101,14 @@ export default function SettingsPage() {
   return (
     <AppShell active="">
       <div className="mb-6">
-        <div className="text-3xl font-semibold">Settings</div>
-        <Subhead>Manage account security for your Pilot workspace.</Subhead>
+        <div className="text-3xl font-semibold">Einstellungen</div>
+        <Subhead>Sicherheits- und Darstellungsoptionen für deinen Pilot-Workspace.</Subhead>
       </div>
 
       <Card className="max-w-xl">
         <CardHeader>
-          <div className="text-sm font-semibold">Account</div>
-          <Subhead>{email ? `Signed in as ${email}` : "Signed-in user"}</Subhead>
+          <div className="text-sm font-semibold">Konto</div>
+          <Subhead>{email ? `Angemeldet als ${email}` : "Angemeldeter Benutzer"}</Subhead>
         </CardHeader>
         <CardContent className="space-y-4">
           {error ? (
@@ -100,38 +118,50 @@ export default function SettingsPage() {
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{success}</div>
           ) : null}
 
+          <div className="rounded-xl border border-[color:var(--bp-border)] p-3">
+            <div className="text-sm font-semibold">Darstellung</div>
+            <div className="mt-2 flex gap-2">
+              <Button variant={theme === "light" ? "primary" : "outline"} onClick={() => onThemeChange("light")}>
+                Hell
+              </Button>
+              <Button variant={theme === "dark" ? "primary" : "outline"} onClick={() => onThemeChange("dark")}>
+                Dunkel
+              </Button>
+            </div>
+          </div>
+
           <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-700">Current password</label>
+            <label className="text-sm font-medium text-slate-700">Aktuelles Passwort</label>
             <Input
               type="password"
               value={currentPassword}
               onChange={(e) => setCurrentPassword(e.target.value)}
-              placeholder="Current password"
+              placeholder="Aktuelles Passwort"
             />
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-700">New password</label>
+            <label className="text-sm font-medium text-slate-700">Neues Passwort</label>
             <Input
               type="password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
-              placeholder="At least 10 characters"
+              placeholder="Mindestens 10 Zeichen"
             />
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-700">Confirm new password</label>
+            <label className="text-sm font-medium text-slate-700">Neues Passwort bestätigen</label>
             <Input
               type="password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="Repeat new password"
+              placeholder="Neues Passwort wiederholen"
             />
           </div>
 
           <Button className="w-full" onClick={onChangePassword} disabled={loading || !csrfToken}>
-            {loading ? "Updating..." : "Change password"}
+            {loading ? "Aktualisiere..." : "Passwort ändern"}
           </Button>
         </CardContent>
       </Card>

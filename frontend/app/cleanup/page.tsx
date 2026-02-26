@@ -42,14 +42,14 @@ export default function CleanupPage() {
       const rawMeta = sessionStorage.getItem(PREVIEW_META_KEY);
 
       if (!rawRows || !rawMeta) {
-        setError("No preview data found. Please go back to Preview.");
+        setError("Keine Preview-Daten gefunden. Bitte zurück zu Preview.");
         return;
       }
 
       setRows(JSON.parse(rawRows));
       setMeta(JSON.parse(rawMeta));
     } catch {
-      setError("Failed to load cleanup data.");
+      setError("Bereinigungsdaten konnten nicht geladen werden.");
     }
   }, []);
 
@@ -184,16 +184,16 @@ export default function CleanupPage() {
   }
 
   return (
-    <AppShell active="Upload Files">
+    <AppShell active="Upload">
       <div className="mb-6">
-        <div className="text-3xl font-semibold">Cleanup</div>
+        <div className="text-3xl font-semibold">Bereinigung</div>
         <Subhead>
-          Clean descriptions before Spreadsheet, then manually adjust individual rows when needed.
+          Buchungstexte vor der Tabelle bereinigen und bei Bedarf pro Zeile manuell anpassen.
         </Subhead>
       </div>
 
       <div className="mb-8">
-        <FlowStepper active="Cleanup" />
+        <FlowStepper active="Bereinigung" />
       </div>
 
       {error ? (
@@ -202,15 +202,15 @@ export default function CleanupPage() {
             {error}
           </div>
           <div className="mt-4">
-            <Button onClick={() => router.push("/preview")}>← Back to Preview</Button>
+            <Button onClick={() => router.push("/preview")}>← Zurück zu Preview</Button>
           </div>
         </>
       ) : (
         <div className="grid grid-cols-1 gap-6 md:grid-cols-[360px_1fr]">
           <Card>
             <CardHeader>
-              <div className="text-sm font-semibold">Cleanup Rules</div>
-              <Subhead>Apply cleanup to all normalized descriptions.</Subhead>
+              <div className="text-sm font-semibold">Bereinigungsregeln</div>
+              <Subhead>Regeln auf alle normalisierten Buchungstexte anwenden.</Subhead>
             </CardHeader>
 
             <CardContent className="grid gap-4">
@@ -220,7 +220,7 @@ export default function CleanupPage() {
                   checked={stripBookingWords}
                   onChange={(e) => setStripBookingWords(e.target.checked)}
                 />
-                Remove booking words (Gutschrift, Lastschrift, Kontoübertrag, etc.)
+                Buchungswörter entfernen (Gutschrift, Lastschrift, Kontoübertrag usw.)
               </label>
 
               <label className="flex items-center gap-2 text-sm">
@@ -229,7 +229,7 @@ export default function CleanupPage() {
                   checked={stripIbanRefs}
                   onChange={(e) => setStripIbanRefs(e.target.checked)}
                 />
-                Remove IBANs, references, QR refs, transaction numbers
+                IBANs, Referenzen, QR-Referenzen und Transaktionsnummern entfernen
               </label>
 
               <label className="flex items-center gap-2 text-sm">
@@ -238,7 +238,7 @@ export default function CleanupPage() {
                   checked={stripAddressBits}
                   onChange={(e) => setStripAddressBits(e.target.checked)}
                 />
-                Remove address-like segments and cost labels
+                Adress-/Ortsanteile und Kosten-Segmente entfernen
               </label>
 
               <label className="flex items-center gap-2 text-sm">
@@ -247,19 +247,19 @@ export default function CleanupPage() {
                   checked={titleCase}
                   onChange={(e) => setTitleCase(e.target.checked)}
                 />
-                Convert ALL CAPS text to normal title case
+                GROSSBUCHSTABEN in normale Schreibweise umwandeln
               </label>
 
               <div className="grid gap-2 rounded-xl border border-[color:var(--bp-border)] p-3">
-                <div className="text-xs font-semibold text-slate-600">Add cleanup rule (global)</div>
+                <div className="text-xs font-semibold text-slate-600">Eigene Regel hinzufügen (global)</div>
                 <div className="flex gap-2">
                   <Input
                     value={customDraft}
                     onChange={(e) => setCustomDraft(e.target.value)}
-                    placeholder='Text to remove everywhere, e.g. ": "'
+                    placeholder='Text global entfernen, z. B. ": "'
                   />
                   <Button variant="outline" onClick={addCustomRemoval}>
-                    Add
+                    Hinzufügen
                   </Button>
                 </div>
                 {customRemovals.length ? (
@@ -270,33 +270,33 @@ export default function CleanupPage() {
                         type="button"
                         className="rounded-full border border-[color:var(--bp-border)] bg-white px-2 py-1 text-xs"
                         onClick={() => removeCustomRemoval(r)}
-                        title="Click to remove rule"
+                        title="Regel entfernen"
                       >
                         {r} ×
                       </button>
                     ))}
                   </div>
                 ) : (
-                  <div className="text-xs text-slate-500">No custom rules yet.</div>
+                  <div className="text-xs text-slate-500">Noch keine eigenen Regeln.</div>
                 )}
               </div>
 
               <Button className="w-full" onClick={goSpreadsheet} disabled={!cleanedRows.length}>
-                Continue to Spreadsheet →
+                Weiter zu Tabelle →
               </Button>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
-              <div className="text-sm font-semibold">Before / After</div>
-              <Subhead>Preview of cleaned transaction descriptions</Subhead>
+              <div className="text-sm font-semibold">Vorher / Nachher</div>
+              <Subhead>Vorschau der bereinigten Buchungstexte</Subhead>
             </CardHeader>
 
             <CardContent>
               <div className="mb-3 flex flex-wrap gap-2 text-xs">
-                <Badge variant="blue">{rows.length} rows</Badge>
-                <Badge variant="pink">Cleanup preview</Badge>
+                <Badge variant="blue">{rows.length} Zeilen</Badge>
+                <Badge variant="pink">Bereinigungsvorschau</Badge>
               </div>
 
               <div className="overflow-auto rounded-xl border border-[color:var(--bp-border)] bg-white">
@@ -304,9 +304,9 @@ export default function CleanupPage() {
                   <thead className="bg-slate-50 text-slate-600">
                     <tr>
                       <th className="p-3 text-left">Original</th>
-                      <th className="p-3 text-left">Cleaned</th>
-                      <th className="p-3 text-left">Amount</th>
-                      <th className="p-3 text-left">Row Controls</th>
+                      <th className="p-3 text-left">Bereinigt</th>
+                      <th className="p-3 text-left">Betrag</th>
+                      <th className="p-3 text-left">Zeilensteuerung</th>
                     </tr>
                   </thead>
                   <tbody className="text-slate-700">
@@ -325,14 +325,14 @@ export default function CleanupPage() {
                                 checked={r.cleanup.rollback}
                                 onChange={() => toggleRowRollback(r.id)}
                               />
-                              Use original text
+                              Originaltext verwenden
                             </label>
                             <Button
                               variant="outline"
                               onClick={() => openEditor(r.id, r.description)}
                               className="h-8 px-3 py-1"
                             >
-                              Edit text
+                              Text bearbeiten
                             </Button>
                             <div className="grid grid-cols-2 gap-1">
                               <label className="flex items-center gap-1">
@@ -342,7 +342,7 @@ export default function CleanupPage() {
                                   onChange={() => toggleRowRule(r.id, "stripBookingWords")}
                                   disabled={r.cleanup.rollback}
                                 />
-                                Booking
+                                Buchung
                               </label>
                               <label className="flex items-center gap-1">
                                 <input
@@ -351,7 +351,7 @@ export default function CleanupPage() {
                                   onChange={() => toggleRowRule(r.id, "stripIbanRefs")}
                                   disabled={r.cleanup.rollback}
                                 />
-                                IBAN/Refs
+                                IBAN/Ref
                               </label>
                               <label className="flex items-center gap-1">
                                 <input
@@ -360,7 +360,7 @@ export default function CleanupPage() {
                                   onChange={() => toggleRowRule(r.id, "stripAddressBits")}
                                   disabled={r.cleanup.rollback}
                                 />
-                                Address
+                                Adresse
                               </label>
                               <label className="flex items-center gap-1">
                                 <input
@@ -369,19 +369,19 @@ export default function CleanupPage() {
                                   onChange={() => toggleRowRule(r.id, "titleCase")}
                                   disabled={r.cleanup.rollback}
                                 />
-                                Title Case
+                                Schreibweise
                               </label>
                             </div>
                             <div className="flex flex-wrap gap-1">
-                              {r.cleanup.rollback ? <Badge variant="pink">rollback</Badge> : null}
-                              {r.cleanup.manualEdit ? <Badge variant="pink">manual edit</Badge> : null}
+                              {r.cleanup.rollback ? <Badge variant="pink">Original</Badge> : null}
+                              {r.cleanup.manualEdit ? <Badge variant="pink">Manuell</Badge> : null}
                               {r.cleanup.changedRules.map((rule) => (
                                 <Badge key={`${r.id}-${rule}`} variant="blue">
                                   {rule}
                                 </Badge>
                               ))}
                               {!r.cleanup.rollback && !r.cleanup.manualEdit && !r.cleanup.changedRules.length ? (
-                                <span className="text-slate-400">no changes</span>
+                                <span className="text-slate-400">Keine Änderungen</span>
                               ) : null}
                             </div>
                           </div>
@@ -391,7 +391,7 @@ export default function CleanupPage() {
                     {!cleanedRows.length ? (
                       <tr>
                         <td colSpan={4} className="p-6 text-center text-slate-500">
-                          No rows available.
+                          Keine Zeilen verfügbar.
                         </td>
                       </tr>
                     ) : null}
@@ -407,8 +407,8 @@ export default function CleanupPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
           <Card className="w-full max-w-2xl">
             <CardHeader>
-              <div className="text-sm font-semibold">Edit Cleaned Text</div>
-              <Subhead>Override cleanup output for this row.</Subhead>
+              <div className="text-sm font-semibold">Bereinigten Text bearbeiten</div>
+              <Subhead>Bereinigungsergebnis für diese Zeile manuell überschreiben.</Subhead>
             </CardHeader>
             <CardContent className="grid gap-3">
               <textarea
@@ -417,7 +417,7 @@ export default function CleanupPage() {
                 onChange={(e) => setEditDraft(e.target.value)}
               />
               <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setEditingRowId("")}>Cancel</Button>
+                <Button variant="outline" onClick={() => setEditingRowId("")}>Abbrechen</Button>
                 <Button variant="outline" onClick={() => {
                   setManualEdits((prev) => {
                     const next = { ...prev };
@@ -427,9 +427,9 @@ export default function CleanupPage() {
                   setEditingRowId("");
                   setEditDraft("");
                 }}>
-                  Clear override
+                  Überschreibung löschen
                 </Button>
-                <Button onClick={saveEditor}>Save text</Button>
+                <Button onClick={saveEditor}>Text speichern</Button>
               </div>
             </CardContent>
           </Card>

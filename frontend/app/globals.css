@@ -7,6 +7,9 @@
   color-scheme: light;
   --bp-border: #e5e7eb; /* slate-200 */
   --bp-pill: #f1f5f9;   /* slate-100 */
+  --bp-bg: #ffffff;
+  --bp-text: #0f172a;
+  --bp-surface: #ffffff;
 }
 
 html, body { height: 100%; }
@@ -14,6 +17,45 @@ html, body { height: 100%; }
 body {
   margin: 0;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  background: var(--bp-bg);
+  color: var(--bp-text);
 }
 
 * { box-sizing: border-box; }
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bp-border: #374151;
+  --bp-pill: #1f2937;
+  --bp-bg: #0b1220;
+  --bp-text: #e5e7eb;
+  --bp-surface: #111827;
+}
+
+html[data-theme="dark"] body {
+  background: var(--bp-bg);
+  color: var(--bp-text);
+}
+
+html[data-theme="dark"] .bg-white,
+html[data-theme="dark"] .bg-white\/60,
+html[data-theme="dark"] .bg-white\/70,
+html[data-theme="dark"] .bg-white\/90 {
+  background-color: #111827 !important;
+}
+
+html[data-theme="dark"] .bg-slate-50,
+html[data-theme="dark"] .bg-slate-50\/40 {
+  background-color: #1f2937 !important;
+}
+
+html[data-theme="dark"] .text-slate-500,
+html[data-theme="dark"] .text-slate-600,
+html[data-theme="dark"] .text-slate-700 {
+  color: #cbd5e1 !important;
+}
+
+html[data-theme="dark"] .border-\[color\:var\(--bp-border\)\],
+html[data-theme="dark"] .border-slate-200 {
+  border-color: var(--bp-border) !important;
+}

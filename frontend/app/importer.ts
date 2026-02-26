@@ -818,7 +818,33 @@ export function buildPresetMapping(ctx: ImportContext, candidate: ParsedTableCan
 
 function isLikelySummaryBooking(text: string): boolean {
   const s = safeText(text).toLowerCase();
-  return s.includes("sammelauftrag") || s.includes("sammelbuchung") || s.includes("sammelauftr");
+  return (
+    s.includes("sammelauftrag") ||
+    s.includes("sammelbuchung") ||
+    s.includes("sammelauftr") ||
+    /belastungen?\s+e[-\s]?banking/.test(s) ||
+    /gutschriften?\s+e[-\s]?banking/.test(s)
+  );
+}
+
+function hasOutflowHint(text: string): boolean {
+  const s = safeText(text).toLowerCase();
+  return (
+    s.includes("belastung") ||
+    s.includes("lastschrift") ||
+    s.includes("zahlung ausgang") ||
+    s.includes("debit")
+  );
+}
+
+function hasInflowHint(text: string): boolean {
+  const s = safeText(text).toLowerCase();
+  return (
+    s.includes("gutschrift") ||
+    s.includes("eingang") ||
+    s.includes("zahlung eingang") ||
+    s.includes("credit")
+  );
 }
 
 function applySignMode(raw: number, signMode: PreviewMapping["signMode"]): number {
@@ -842,7 +868,17 @@ function resolveAmount(
 
   if (mapping.amountMode !== "split") {
     const raw = mapping.amountColumn ? parseAmountLoose(row[mapping.amountColumn] || "") : 0;
-    return { amount: applySignMode(raw, mapping.signMode), diagnostics };
+    let amount = applySignMode(raw, mapping.signMode);
+    if (mapping.signMode === "as_is" && amount > 0) {
+      const col = normalizeHeader(mapping.amountColumn || "");
+      if (col.includes("belastung") || col.includes("lastschrift") || col.includes("debit")) {
+        amount = -Math.abs(amount);
+      }
+      if (col.includes("gutschrift") || col.includes("credit")) {
+        amount = Math.abs(amount);
+      }
+    }
+    return { amount, diagnostics };
   }
 
   const debit = mapping.debitColumn ? parseAmountLoose(row[mapping.debitColumn] || "") : 0;
@@ -908,7 +944,7 @@ export function normalizeRows(
       .filter(Boolean);
 
     const description = descParts.join(" | ");
-    const { amount: signedAmount, diagnostics } = resolveAmount(row, mapping, currentSummarySign);
+    const { amount: rawSignedAmount, diagnostics } = resolveAmount(row, mapping, currentSummarySign);
 
     const currency = mapping.currencyColumn
       ? safeText(row[mapping.currencyColumn] || "") || "CHF"
@@ -920,8 +956,19 @@ export function normalizeRows(
       currentSummaryDate = parsedDate;
     }
 
+    let signedAmount = rawSignedAmount;
+    // Human-friendly fallback: if amount is positive and sign mode is as-is,
+    // infer debit/credit direction from text labels like "Belastung USD".
+    if (mapping.amountMode === "single" && mapping.signMode === "as_is" && signedAmount > 0) {
+      if (hasOutflowHint(description)) signedAmount = -Math.abs(signedAmount);
+      if (hasInflowHint(description)) signedAmount = Math.abs(signedAmount);
+    }
+
     if (isSummary && signedAmount !== 0) {
       currentSummarySign = signedAmount > 0 ? 1 : -1;
+    } else if (isSummary) {
+      if (hasOutflowHint(description)) currentSummarySign = -1;
+      if (hasInflowHint(description)) currentSummarySign = 1;
     }
 
     if (mapping.dropSummaryRows && isSummary) {

@@ -30,7 +30,7 @@ export default function PreviewPage() {
     try {
       const raw = sessionStorage.getItem(IMPORT_CONTEXT_KEY);
       if (!raw) {
-        setError("No uploaded file context found. Please go back to Upload.");
+        setError("Kein Upload-Kontext gefunden. Bitte zurück zu Upload.");
         return;
       }
 
@@ -39,14 +39,14 @@ export default function PreviewPage() {
 
       const first = parsed.candidates?.[0];
       if (!first) {
-        setError("No table candidates found.");
+        setError("Keine Tabellen-Kandidaten gefunden.");
         return;
       }
 
       setMapping(buildPresetMapping(parsed, first));
       setUseAutoTextColumns(true);
     } catch {
-      setError("Failed to load preview context.");
+      setError("Preview-Kontext konnte nicht geladen werden.");
     }
   }, []);
 
@@ -112,21 +112,21 @@ export default function PreviewPage() {
 
     if (!effectiveMapping) return { errors, warnings };
 
-    if (!effectiveMapping.dateColumn) errors.push("Select a date column.");
+    if (!effectiveMapping.dateColumn) errors.push("Bitte eine Datums-Spalte auswählen.");
     if (!effectiveMapping.textColumns.length) {
-      errors.push("Select at least one posting text column (or use auto text detection).");
+      errors.push("Bitte mindestens eine Text-Spalte auswählen (oder automatische Erkennung aktivieren).");
     }
 
     if (effectiveMapping.amountMode === "single") {
-      if (!effectiveMapping.amountColumn) errors.push("Select an amount column.");
+      if (!effectiveMapping.amountColumn) errors.push("Bitte eine Betrags-Spalte auswählen.");
     } else {
       if (!effectiveMapping.debitColumn && !effectiveMapping.creditColumn && !effectiveMapping.fallbackAmountColumn) {
-        errors.push("For split mode, map debit and/or credit, or provide a fallback amount column.");
+        errors.push("Für Soll/Haben-Modus bitte Belastung/Gutschrift oder eine Fallback-Betragsspalte mappen.");
       }
     }
 
     if (!normalizedRows.length) {
-      errors.push("Mapping currently produces no rows.");
+      errors.push("Das aktuelle Mapping erzeugt keine Zeilen.");
       return { errors, warnings };
     }
 
@@ -136,29 +136,29 @@ export default function PreviewPage() {
       (r) => !!safeText(r.description) && !/^Row \d+$/i.test(safeText(r.description))
     ).length;
 
-    if (dateCount === 0) errors.push("No parsed dates found in normalized rows.");
-    if (amountCount === 0) errors.push("No non-zero amounts found in normalized rows.");
-    if (descCount === 0) errors.push("No usable descriptions found in normalized rows.");
+    if (dateCount === 0) errors.push("Keine erkennbaren Datumswerte in den normalisierten Zeilen.");
+    if (amountCount === 0) errors.push("Keine Beträge ungleich 0 in den normalisierten Zeilen.");
+    if (descCount === 0) errors.push("Keine verwendbaren Buchungstexte in den normalisierten Zeilen.");
 
     const dateRate = dateCount / normalizedRows.length;
     const amountRate = amountCount / normalizedRows.length;
-    if (dateRate < 0.7) warnings.push(`Only ${Math.round(dateRate * 100)}% rows have a parsed date.`);
-    if (amountRate < 0.7) warnings.push(`Only ${Math.round(amountRate * 100)}% rows have a non-zero amount.`);
+    if (dateRate < 0.7) warnings.push(`Nur ${Math.round(dateRate * 100)}% der Zeilen haben ein erkanntes Datum.`);
+    if (amountRate < 0.7) warnings.push(`Nur ${Math.round(amountRate * 100)}% der Zeilen haben einen Betrag ungleich 0.`);
 
     const ambiguousCount = normalizedRows.filter((r) => r.amountDiagnostics?.ambiguousBothSides).length;
     const fallbackCount = normalizedRows.filter((r) => r.amountDiagnostics?.usedFallback).length;
     const inheritedCount = normalizedRows.filter((r) => r.amountDiagnostics?.summaryInheritedSign).length;
     if (ambiguousCount > 0) {
       warnings.push(
-        `${ambiguousCount} row(s) had both debit and credit values; amount was derived by netting credit - debit.`
+        `${ambiguousCount} Zeile(n) hatten Belastung und Gutschrift gleichzeitig; Betrag wurde als Gutschrift minus Belastung berechnet.`
       );
     }
     if (fallbackCount > 0) {
-      warnings.push(`${fallbackCount} row(s) used fallback amount column.`);
+      warnings.push(`${fallbackCount} Zeile(n) verwenden die Fallback-Betragsspalte.`);
     }
     if (inheritedCount > 0) {
       warnings.push(
-        `${inheritedCount} UBS fallback row(s) inherited sign from prior summary booking.`
+        `${inheritedCount} Zeile(n) haben das Vorzeichen aus einer Sammelbuchung übernommen.`
       );
     }
 
@@ -188,7 +188,7 @@ export default function PreviewPage() {
 
   if (error) {
     return (
-      <AppShell active="Upload Files">
+      <AppShell active="Upload">
         <div className="mb-8">
           <FlowStepper active="Preview" />
         </div>
@@ -196,7 +196,7 @@ export default function PreviewPage() {
           {error}
         </div>
         <div className="mt-4">
-          <Button onClick={() => router.push("/upload")}>← Back to Upload</Button>
+          <Button onClick={() => router.push("/upload")}>← Zurück zu Upload</Button>
         </div>
       </AppShell>
     );
@@ -204,10 +204,10 @@ export default function PreviewPage() {
 
   if (!ctx || !mapping || !candidate || !effectiveMapping) {
     return (
-      <AppShell active="Upload Files">
+      <AppShell active="Upload">
         <div className="mb-6">
-          <div className="text-3xl font-semibold">Preview & Column Mapping</div>
-          <Subhead>Loading preview context…</Subhead>
+          <div className="text-3xl font-semibold">Preview & Spalten-Mapping</div>
+          <Subhead>Preview-Daten werden geladen…</Subhead>
         </div>
 
         <div className="mb-8">
@@ -215,22 +215,22 @@ export default function PreviewPage() {
         </div>
 
         <div className="rounded-xl border border-[color:var(--bp-border)] bg-white p-6 text-sm text-slate-500">
-          Waiting for uploaded file context. If this persists, go back to Upload.
+          Warte auf Upload-Kontext. Wenn das bestehen bleibt, gehe zurück zu Upload.
         </div>
 
         <div className="mt-4">
-          <Button onClick={() => router.push("/upload")}>← Back to Upload</Button>
+          <Button onClick={() => router.push("/upload")}>← Zurück zu Upload</Button>
         </div>
       </AppShell>
     );
   }
 
   return (
-    <AppShell active="Upload Files">
+    <AppShell active="Upload">
       <div className="mb-6">
-        <div className="text-3xl font-semibold">Preview & Column Mapping</div>
+        <div className="text-3xl font-semibold">Preview & Spalten-Mapping</div>
         <Subhead>
-          Focus on amount mapping first. Date and text mapping can be reviewed below.
+          Fokus zuerst auf die Betragslogik. Danach Datum und Text prüfen.
         </Subhead>
       </div>
 
@@ -241,13 +241,13 @@ export default function PreviewPage() {
       <div className="grid grid-cols-1 gap-6 md:grid-cols-[420px_1fr]">
         <Card>
           <CardHeader>
-            <div className="text-sm font-semibold">Mapping Wizard</div>
-            <Subhead>Column mapping for any bank export format.</Subhead>
+            <div className="text-sm font-semibold">Mapping-Assistent</div>
+            <Subhead>Spalten-Mapping für unterschiedliche Bankformate.</Subhead>
           </CardHeader>
 
           <CardContent className="grid gap-4">
             <div className="grid gap-2">
-              <div className="text-xs font-semibold text-slate-600">Table Candidate</div>
+              <div className="text-xs font-semibold text-slate-600">Tabellen-Kandidat</div>
               <Select value={mapping.candidateId} onChange={(e) => onCandidateChange(e.target.value)}>
                 {ctx.candidates.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -259,7 +259,7 @@ export default function PreviewPage() {
             </div>
 
             <div className="grid gap-2 rounded-xl border border-[color:var(--bp-border)] p-3">
-              <div className="text-xs font-semibold text-slate-600">Amount Structure</div>
+              <div className="text-xs font-semibold text-slate-600">Betragsstruktur</div>
               <div className="flex flex-col gap-2 text-sm">
                 <label className="flex items-center gap-2">
                   <input
@@ -268,7 +268,7 @@ export default function PreviewPage() {
                     checked={mapping.amountMode === "single"}
                     onChange={() => patchMapping("amountMode", "single")}
                   />
-                  Single signed amount column
+                  Einzelne Betragsspalte (mit Vorzeichen)
                 </label>
                 <label className="flex items-center gap-2">
                   <input
@@ -277,19 +277,19 @@ export default function PreviewPage() {
                     checked={mapping.amountMode === "split"}
                     onChange={() => patchMapping("amountMode", "split")}
                   />
-                  Split columns (debit / credit)
+                  Getrennte Spalten (Belastung / Gutschrift)
                 </label>
               </div>
 
               {mapping.amountMode === "single" ? (
                 <>
                   <div className="grid gap-2">
-                    <div className="text-xs font-semibold text-slate-600">Amount Column</div>
+                    <div className="text-xs font-semibold text-slate-600">Betragsspalte</div>
                     <Select
                       value={mapping.amountColumn}
                       onChange={(e) => patchMapping("amountColumn", e.target.value)}
                     >
-                      <option value="">— select —</option>
+                      <option value="">— auswählen —</option>
                       {candidate.headers.map((h) => (
                         <option key={h} value={h}>
                           {h}
@@ -299,28 +299,28 @@ export default function PreviewPage() {
                   </div>
 
                   <div className="grid gap-2">
-                    <div className="text-xs font-semibold text-slate-600">Sign Handling</div>
+                    <div className="text-xs font-semibold text-slate-600">Vorzeichen-Regel</div>
                     <Select
                       value={mapping.signMode}
                       onChange={(e) =>
                         patchMapping("signMode", e.target.value as PreviewMapping["signMode"])
                       }
                     >
-                      <option value="as_is">Use sign as-is</option>
-                      <option value="debit_positive">Positive values are outflows</option>
-                      <option value="invert">Invert all signs</option>
+                      <option value="as_is">Vorzeichen aus Datei verwenden</option>
+                      <option value="debit_positive">Positive Werte = Belastung (Abfluss)</option>
+                      <option value="invert">Alle Vorzeichen umkehren</option>
                     </Select>
                   </div>
                 </>
               ) : (
                 <>
                   <div className="grid gap-2">
-                    <div className="text-xs font-semibold text-slate-600">Debit column (outflow)</div>
+                    <div className="text-xs font-semibold text-slate-600">Belastungsspalte (Abfluss)</div>
                     <Select
                       value={mapping.debitColumn}
                       onChange={(e) => patchMapping("debitColumn", e.target.value)}
                     >
-                      <option value="">— select —</option>
+                      <option value="">— auswählen —</option>
                       {candidate.headers.map((h) => (
                         <option key={h} value={h}>
                           {h}
@@ -330,12 +330,12 @@ export default function PreviewPage() {
                   </div>
 
                   <div className="grid gap-2">
-                    <div className="text-xs font-semibold text-slate-600">Credit column (inflow)</div>
+                    <div className="text-xs font-semibold text-slate-600">Gutschriftsspalte (Zufluss)</div>
                     <Select
                       value={mapping.creditColumn}
                       onChange={(e) => patchMapping("creditColumn", e.target.value)}
                     >
-                      <option value="">— select —</option>
+                      <option value="">— auswählen —</option>
                       {candidate.headers.map((h) => (
                         <option key={h} value={h}>
                           {h}
@@ -345,12 +345,12 @@ export default function PreviewPage() {
                   </div>
 
                   <div className="grid gap-2">
-                    <div className="text-xs font-semibold text-slate-600">Fallback Amount (optional)</div>
+                    <div className="text-xs font-semibold text-slate-600">Fallback-Betrag (optional)</div>
                     <Select
                       value={mapping.fallbackAmountColumn}
                       onChange={(e) => patchMapping("fallbackAmountColumn", e.target.value)}
                     >
-                      <option value="">— none —</option>
+                      <option value="">— keiner —</option>
                       {candidate.headers.map((h) => (
                         <option key={h} value={h}>
                           {h}
@@ -363,12 +363,12 @@ export default function PreviewPage() {
             </div>
 
             <div className="grid gap-2">
-              <div className="text-xs font-semibold text-slate-600">Date Column</div>
+              <div className="text-xs font-semibold text-slate-600">Datums-Spalte</div>
               <Select
                 value={mapping.dateColumn}
                 onChange={(e) => patchMapping("dateColumn", e.target.value)}
               >
-                <option value="">— select —</option>
+                <option value="">— auswählen —</option>
                 {candidate.headers.map((h) => (
                   <option key={h} value={h}>
                     {h}
@@ -378,12 +378,12 @@ export default function PreviewPage() {
             </div>
 
             <div className="grid gap-2">
-              <div className="text-xs font-semibold text-slate-600">Currency Column (optional)</div>
+              <div className="text-xs font-semibold text-slate-600">Währungs-Spalte (optional)</div>
               <Select
                 value={mapping.currencyColumn}
                 onChange={(e) => patchMapping("currencyColumn", e.target.value)}
               >
-                <option value="">— none (default CHF) —</option>
+                <option value="">— keine (Standard CHF) —</option>
                 {candidate.headers.map((h) => (
                   <option key={h} value={h}>
                     {h}
@@ -394,7 +394,7 @@ export default function PreviewPage() {
 
             <div className="grid gap-2">
               <div className="flex items-center justify-between">
-                <div className="text-xs font-semibold text-slate-600">Posting Text Columns</div>
+                <div className="text-xs font-semibold text-slate-600">Buchungstext-Spalten</div>
                 <label className="flex items-center gap-2 text-xs text-slate-600">
                   <input
                     type="checkbox"
@@ -407,21 +407,21 @@ export default function PreviewPage() {
                       }
                     }}
                   />
-                  Auto detect
+                  Automatisch
                 </label>
               </div>
 
               {useAutoTextColumns ? (
                 <div className="rounded-xl border border-[color:var(--bp-border)] bg-slate-50 p-3">
                   <div className="flex flex-wrap gap-2">
-                    {(autoTextColumns.length ? autoTextColumns : ["No text columns detected"]).map((h) => (
+                    {(autoTextColumns.length ? autoTextColumns : ["Keine Textspalten erkannt"]).map((h) => (
                       <Badge key={h} variant="blue">
                         {h}
                       </Badge>
                     ))}
                   </div>
                   <div className="mt-2 text-xs text-slate-500">
-                    These columns were auto-detected. Turn off auto detect to choose manually.
+                    Diese Spalten wurden automatisch erkannt. Deaktivieren, um manuell zu wählen.
                   </div>
                 </div>
               ) : (
@@ -444,19 +444,19 @@ export default function PreviewPage() {
             </div>
 
             <div className="grid gap-2 rounded-xl border border-[color:var(--bp-border)] p-3">
-              <div className="text-xs font-semibold text-slate-600">Optional Mapping Preset</div>
+              <div className="text-xs font-semibold text-slate-600">Optionales Mapping-Preset</div>
               <Select
                 value={mapping.bankTemplate}
                 onChange={(e) => applyPreset(e.target.value as PreviewMapping["bankTemplate"])}
               >
-                <option value="generic">Generic</option>
-                <option value="split_generic">Generic split debit/credit</option>
-                <option value="ubs">UBS / split + Einzelbetrag fallback</option>
-                <option value="clientis">Clientis / headerless export</option>
+                <option value="generic">Generisch</option>
+                <option value="split_generic">Generisch mit Belastung/Gutschrift</option>
+                <option value="ubs">UBS / split + Einzelbetrag-Fallback</option>
+                <option value="clientis">Clientis / Export ohne Header</option>
                 <option value="acrevis">Acrevis</option>
               </Select>
               <div className="text-xs text-slate-500">
-                Use this only if auto mapping does not fit your file.
+                Nur verwenden, wenn das automatische Mapping nicht passt.
               </div>
             </div>
 
@@ -466,7 +466,7 @@ export default function PreviewPage() {
                 checked={mapping.dropSummaryRows}
                 onChange={(e) => patchMapping("dropSummaryRows", e.target.checked)}
               />
-              Drop summary booking rows (e.g. Sammelauftrag parent row)
+              Sammelbuchungen ausblenden (z. B. Elternzeile von Sammelauftrag)
             </label>
 
             {validation.errors.length > 0 ? (
@@ -486,7 +486,7 @@ export default function PreviewPage() {
             ) : null}
 
             <Button className="w-full" onClick={goCleanup} disabled={!canContinue}>
-              Continue to Cleanup →
+              Weiter zu Bereinigung →
             </Button>
           </CardContent>
         </Card>
@@ -495,7 +495,7 @@ export default function PreviewPage() {
           <CardHeader>
             <div className="text-sm font-semibold">Normalized Preview</div>
             <Subhead>
-              {normalizedRows.length} rows after mapping. Amounts are normalized as absolute values.
+              {normalizedRows.length} Zeilen nach Mapping. Beträge sind als absolute Werte normalisiert.
             </Subhead>
           </CardHeader>
 
@@ -510,12 +510,12 @@ export default function PreviewPage() {
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-slate-600">
                   <tr>
-                    <th className="p-3 text-left">Date</th>
-                    <th className="p-3 text-left">Description</th>
-                    <th className="p-3 text-left">Amount</th>
-                    <th className="p-3 text-left">Currency</th>
-                    <th className="p-3 text-left">Type</th>
-                    <th className="p-3 text-left">Amount Rule</th>
+                    <th className="p-3 text-left">Datum</th>
+                    <th className="p-3 text-left">Buchungstext</th>
+                    <th className="p-3 text-left">Betrag</th>
+                    <th className="p-3 text-left">Währung</th>
+                    <th className="p-3 text-left">Richtung</th>
+                    <th className="p-3 text-left">Betragsquelle</th>
                   </tr>
                 </thead>
                 <tbody className="text-slate-700">
@@ -537,18 +537,18 @@ export default function PreviewPage() {
                       <td className="p-3 text-xs">
                         <div className="flex flex-wrap gap-1">
                           {r.amountDiagnostics?.ambiguousBothSides ? (
-                            <Badge variant="pink">ambiguous split</Badge>
+                            <Badge variant="pink">Belastung+Gutschrift</Badge>
                           ) : null}
-                          {r.amountDiagnostics?.usedDebit ? <Badge variant="blue">debit</Badge> : null}
-                          {r.amountDiagnostics?.usedCredit ? <Badge variant="blue">credit</Badge> : null}
-                          {r.amountDiagnostics?.usedFallback ? <Badge variant="blue">fallback</Badge> : null}
+                          {r.amountDiagnostics?.usedDebit ? <Badge variant="blue">Belastung</Badge> : null}
+                          {r.amountDiagnostics?.usedCredit ? <Badge variant="blue">Gutschrift</Badge> : null}
+                          {r.amountDiagnostics?.usedFallback ? <Badge variant="blue">Fallback</Badge> : null}
                           {r.amountDiagnostics?.summaryInheritedSign ? (
-                            <Badge variant="pink">summary sign</Badge>
+                            <Badge variant="pink">Sammel-Vorzeichen</Badge>
                           ) : null}
                           {!r.amountDiagnostics?.usedDebit &&
                           !r.amountDiagnostics?.usedCredit &&
                           !r.amountDiagnostics?.usedFallback ? (
-                            <span className="text-slate-400">direct/single</span>
+                            <span className="text-slate-400">Direkt/Einzelspalte</span>
                           ) : null}
                         </div>
                       </td>
@@ -557,12 +557,48 @@ export default function PreviewPage() {
                   {!normalizedRows.length ? (
                     <tr>
                       <td colSpan={6} className="p-6 text-center text-slate-500">
-                        No rows produced yet. Adjust the mapping on the left.
+                        Noch keine Zeilen. Bitte links das Mapping anpassen.
                       </td>
                     </tr>
                   ) : null}
                 </tbody>
               </table>
+            </div>
+
+            <div className="mt-6">
+              <div className="text-sm font-semibold">Rohdaten-Vorschau (Human-in-the-loop)</div>
+              <Subhead>Direkter Blick in die Originalzeilen inkl. Sammelbuchungen und Rohspalten.</Subhead>
+              <div className="mt-3 overflow-auto rounded-xl border border-[color:var(--bp-border)] bg-white">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50 text-slate-600">
+                    <tr>
+                      {candidate.headers.map((h) => (
+                        <th key={h} className="p-2 text-left font-semibold">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="text-slate-700">
+                    {candidate.rows.slice(0, 12).map((row, idx) => (
+                      <tr key={`raw-${idx}`} className="border-t border-[color:var(--bp-border)]">
+                        {candidate.headers.map((h) => (
+                          <td key={`${idx}-${h}`} className="p-2 whitespace-nowrap">
+                            {safeText(row[h] || "") || "—"}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                    {!candidate.rows.length ? (
+                      <tr>
+                        <td colSpan={candidate.headers.length || 1} className="p-4 text-center text-slate-500">
+                          Keine Rohzeilen verfügbar.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </CardContent>
         </Card>

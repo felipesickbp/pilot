@@ -362,7 +362,7 @@ export default function SpreadsheetPage() {
   }
 
   return (
-    <AppShell active="Upload Files">
+    <AppShell active="Upload">
       <div className="mb-6">
         <div className="text-3xl font-semibold">Transaction Spreadsheet</div>
         <Subhead>
@@ -371,7 +371,7 @@ export default function SpreadsheetPage() {
       </div>
 
       <div className="mb-8">
-        <FlowStepper active="Spreadsheet" />
+        <FlowStepper active="Tabelle" />
       </div>
 
       {toast ? (

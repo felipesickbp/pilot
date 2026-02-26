@@ -156,7 +156,7 @@ export default function PostingRulesPage() {
   }
 
   return (
-    <AppShell active="Posting Rules">
+    <AppShell active="Buchungsregeln">
       <Card>
         <CardHeader>
           <div className="flex items-start justify-between gap-4">

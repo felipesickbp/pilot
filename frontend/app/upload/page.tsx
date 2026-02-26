@@ -103,11 +103,11 @@ export default function UploadPage() {
   }
 
   return (
-    <AppShell active="Upload Files">
+    <AppShell active="Upload">
       <div className="mb-6">
-        <div className="text-3xl font-semibold">Upload Transaction Files</div>
+        <div className="text-3xl font-semibold">Transaktionsdateien hochladen</div>
         <Subhead>
-          Upload CSV, Excel, or CAMT XML. We detect flexible table candidates here, then map them in Preview.
+          CSV, Excel oder CAMT XML hochladen. Danach Kandidaten prüfen und in Preview mappen.
         </Subhead>
       </div>
 
@@ -120,16 +120,16 @@ export default function UploadPage() {
           <CardHeader>
             <div className="flex items-center gap-2 text-sm font-semibold">
               <UploadCloud className="h-5 w-5 text-slate-500" />
-              Upload & Detect Candidates
+              Upload & Kandidaten erkennen
             </div>
-            <Subhead>Select a file and the bank account (GL) used for posting.</Subhead>
+            <Subhead>Datei auswählen und das Bankkonto (Hauptbuch) für die Buchung festlegen.</Subhead>
           </CardHeader>
 
           <CardContent className="grid gap-4">
             <div className="grid gap-2">
-              <div className="text-xs font-semibold text-slate-600">Connected bexio company</div>
+              <div className="text-xs font-semibold text-slate-600">Verbundener bexio-Mandant</div>
               <div className="h-10 rounded-xl border border-[color:var(--bp-border)] bg-slate-50 px-3 text-sm text-slate-700 flex items-center">
-                {clientName || "Not connected"}
+                {clientName || "Nicht verbunden"}
               </div>
             </div>
 
@@ -141,12 +141,12 @@ export default function UploadPage() {
                 placeholder="e.g. 1020"
               />
               <div className="text-xs text-slate-500">
-                Bankkonto is used later as Soll/Haben depending on inflow/outflow.
+                Das Bankkonto wird später je nach Geldfluss in Soll oder Haben gesetzt.
               </div>
             </div>
 
             <div className="grid gap-2">
-              <div className="text-xs font-semibold text-slate-600">VAT Status (demo)</div>
+              <div className="text-xs font-semibold text-slate-600">MWST-Status (Demo)</div>
               <div className="flex items-center gap-3 text-sm">
                 <label className="flex items-center gap-2">
                   <input
@@ -155,7 +155,7 @@ export default function UploadPage() {
                     checked={vatMode === "with"}
                     onChange={() => setVatMode("with")}
                   />
-                  With VAT <Badge variant="pink">VAT</Badge>
+                  Mit MWST <Badge variant="pink">MWST</Badge>
                 </label>
                 <label className="flex items-center gap-2">
                   <input
@@ -164,7 +164,7 @@ export default function UploadPage() {
                     checked={vatMode === "without"}
                     onChange={() => setVatMode("without")}
                   />
-                  Without VAT
+                  Ohne MWST
                 </label>
               </div>
             </div>
@@ -180,9 +180,9 @@ export default function UploadPage() {
                 <Landmark className="h-5 w-5 text-slate-500" />
               </div>
               <div className="text-sm font-medium">
-                {fileName ? `Selected: ${fileName}` : "Click to select a CSV, Excel, or CAMT XML file"}
+                {fileName ? `Ausgewählt: ${fileName}` : "Hier klicken, um CSV-, Excel- oder CAMT-XML-Datei zu wählen"}
               </div>
-              <div className="mt-1 text-xs text-slate-500">CSV, XLSX, XLS, XML supported.</div>
+              <div className="mt-1 text-xs text-slate-500">Unterstützt: CSV, XLSX, XLS, XML.</div>
             </label>
 
             {error ? (
@@ -195,21 +195,21 @@ export default function UploadPage() {
               <div className="rounded-xl border border-[color:var(--bp-border)] bg-slate-50 p-3 text-sm">
                 <div className="font-semibold">Candidates detected</div>
                 <div className="mt-1 text-slate-600">
-                  Count: <span className="font-medium">{summary.candidateCount}</span>
+                  Anzahl: <span className="font-medium">{summary.candidateCount}</span>
                 </div>
                 <div className="mt-1 text-xs text-slate-500">{summary.bestSummary}</div>
                 <div className="mt-2 text-xs text-slate-500">
-                  Next step: Preview (choose candidate, map columns, define amount logic).
+                  Nächster Schritt: Preview (Kandidat wählen, Spalten zuordnen, Betragslogik festlegen).
                 </div>
               </div>
             ) : null}
 
             <div className="grid grid-cols-2 gap-3">
               <Button className="w-full" onClick={goPreview} disabled={!candidateCount}>
-                Continue to Preview →
+                Weiter zu Preview →
               </Button>
               <Button className="w-full" variant="outline" onClick={resetAll}>
-                Reset
+                Zurücksetzen
               </Button>
             </div>
           </CardContent>
@@ -219,32 +219,32 @@ export default function UploadPage() {
           <CardHeader>
             <div className="text-sm font-semibold text-slate-600">Why this works across banks</div>
             <Subhead className="text-slate-500">
-              We do not hard-code one format. The user guides the wizard when columns differ.
+              Kein starres Bankformat: Bei abweichenden Spalten steuerst du das Mapping selbst.
             </Subhead>
           </CardHeader>
           <CardContent className="grid gap-3">
             <FormatRow
               icon={<FileText className="h-5 w-5" />}
               title="CSV Files"
-              desc="Handles metadata rows, shifted headers, and even headerless exports."
+              desc="Verarbeitet Metazeilen, verschobene Header und Exporte ohne Kopfzeile."
               highlight
             />
             <FormatRow
               icon={<FileSpreadsheet className="h-5 w-5" />}
-              title="Excel Files"
-              desc="Reads the first sheet and proposes multiple possible header rows."
+              title="Excel-Dateien"
+              desc="Liest Arbeitsblätter und schlägt mehrere mögliche Header-Zeilen vor."
               highlight
             />
             <FormatRow
               icon={<Landmark className="h-5 w-5" />}
               title="CAMT.053"
-              desc="Still supported for XML parsing."
+              desc="CAMT-XML wird weiterhin unterstützt."
               highlight
             />
             <FormatRow
               icon={<FileText className="h-5 w-5" />}
-              title="Cleanup-friendly"
-              desc="Text normalization happens later in Cleanup, not here."
+              title="Bereinigungsfreundlich"
+              desc="Textbereinigung erfolgt bewusst erst im Schritt Bereinigung."
               highlight
             />
           </CardContent>

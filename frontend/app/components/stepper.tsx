@@ -7,9 +7,9 @@ import { FileUp, Eye, Sparkles, Sheet, CheckCircle } from "lucide-react";
 const steps = [
   { key: "Upload", icon: FileUp, href: "/upload" },
   { key: "Preview", icon: Eye, href: "/preview" },
-  { key: "Cleanup", icon: Sparkles, href: "/cleanup" },
-  { key: "Spreadsheet", icon: Sheet, href: "/spreadsheet" },
-  { key: "Complete", icon: CheckCircle, href: "/complete" },
+  { key: "Bereinigung", icon: Sparkles, href: "/cleanup" },
+  { key: "Tabelle", icon: Sheet, href: "/spreadsheet" },
+  { key: "Abschluss", icon: CheckCircle, href: "/complete" },
 ];
 
 export function FlowStepper({ active }: { active: string }) {

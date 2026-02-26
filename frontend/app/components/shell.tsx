@@ -7,10 +7,10 @@ import { Settings } from "lucide-react";
 
 const nav = [
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/upload", label: "Upload Files" },
-  { href: "/posting-rules", label: "Posting Rules" },
-  { href: "/direct-import", label: "Direct Import" },
-  { href: "/history", label: "History" },
+  { href: "/upload", label: "Upload" },
+  { href: "/posting-rules", label: "Buchungsregeln" },
+  { href: "/direct-import", label: "Direktimport" },
+  { href: "/history", label: "Historie" },
 ];
 
 export function AppShell({
@@ -39,8 +39,8 @@ export function AppShell({
             <Link
               href="/settings"
               className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[color:var(--bp-border)] bg-white text-slate-600 hover:bg-slate-50"
-              title="Settings"
-              aria-label="Settings"
+              title="Einstellungen"
+              aria-label="Einstellungen"
             >
               <Settings className="h-4 w-4" />
             </Link>
@@ -58,7 +58,7 @@ export function AppShell({
             Pilot Workspace
           </h1>
           <p className="mt-2 text-sm text-slate-500">
-            Upload, classify, and import transactions with intelligent rules for Bexio
+            Transaktionen hochladen, zuordnen und mit intelligenten Regeln in Bexio importieren
           </p>
         </div>
 
@@ -141,15 +141,15 @@ function BexioConnectButton() {
     } catch (e) {
       setConnecting(false);
       console.error(e);
-      alert("Could not start bexio login.");
+      alert("Bexio-Verbindung konnte nicht gestartet werden.");
     }
   }
 
   const label = connecting
-    ? "Connecting..."
+    ? "Verbinde..."
     : session.connected && session.client_name
       ? session.client_name
-      : "Connect to bexio";
+      : "Mit bexio verbinden";
 
   return (
     <button
@@ -158,9 +158,9 @@ function BexioConnectButton() {
       disabled={connecting || loading}
       className="max-w-[320px] truncate rounded-xl border border-[color:var(--bp-border)] bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
       title={label}
-      aria-label={session.connected ? "Reconnect bexio" : "Connect to bexio"}
+      aria-label={session.connected ? "Bexio neu verbinden" : "Mit bexio verbinden"}
     >
-      {loading ? "Connect to bexio" : label}
+      {loading ? "Mit bexio verbinden" : label}
     </button>
   );
 }
@@ -210,10 +210,10 @@ function LogoutButton() {
       onClick={onLogout}
       disabled={!csrfToken || loggingOut}
       className="rounded-xl border border-[color:var(--bp-border)] bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-      title="Logout"
-      aria-label="Logout"
+      title="Abmelden"
+      aria-label="Abmelden"
     >
-      {loggingOut ? "Logging out..." : "Logout"}
+      {loggingOut ? "Melde ab..." : "Abmelden"}
     </button>
   );
 }
