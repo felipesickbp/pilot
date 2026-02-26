@@ -183,6 +183,14 @@ export default function CleanupPage() {
     router.push("/spreadsheet");
   }
 
+  function cleanupRuleLabel(rule: string): string {
+    if (rule === "stripBookingWords") return "Buchungswörter";
+    if (rule === "stripIbanRefs") return "IBAN/Referenzen";
+    if (rule === "stripAddressBits") return "Adressanteile";
+    if (rule === "titleCase") return "Schreibweise";
+    return rule;
+  }
+
   return (
     <AppShell active="Upload">
       <div className="mb-6">
@@ -306,7 +314,7 @@ export default function CleanupPage() {
                       <th className="p-3 text-left">Original</th>
                       <th className="p-3 text-left">Bereinigt</th>
                       <th className="p-3 text-left">Betrag</th>
-                      <th className="p-3 text-left">Zeilensteuerung</th>
+                      <th className="p-3 text-left w-[290px]">Zeilensteuerung</th>
                     </tr>
                   </thead>
                   <tbody className="text-slate-700">
@@ -317,67 +325,55 @@ export default function CleanupPage() {
                         <td className="p-3">
                           <Badge variant="pink">{Math.abs(r.amount).toFixed(2)}</Badge>
                         </td>
-                        <td className="p-3 text-xs">
-                          <div className="grid gap-2">
-                            <label className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={r.cleanup.rollback}
-                                onChange={() => toggleRowRollback(r.id)}
-                              />
-                              Originaltext verwenden
-                            </label>
-                            <Button
-                              variant="outline"
-                              onClick={() => openEditor(r.id, r.description)}
-                              className="h-8 px-3 py-1"
-                            >
-                              Text bearbeiten
-                            </Button>
-                            <div className="grid grid-cols-2 gap-1">
-                              <label className="flex items-center gap-1">
-                                <input
-                                  type="checkbox"
-                                  checked={r.cleanup.effectiveRules.stripBookingWords}
-                                  onChange={() => toggleRowRule(r.id, "stripBookingWords")}
-                                  disabled={r.cleanup.rollback}
-                                />
-                                Buchung
-                              </label>
-                              <label className="flex items-center gap-1">
-                                <input
-                                  type="checkbox"
-                                  checked={r.cleanup.effectiveRules.stripIbanRefs}
-                                  onChange={() => toggleRowRule(r.id, "stripIbanRefs")}
-                                  disabled={r.cleanup.rollback}
-                                />
-                                IBAN/Ref
-                              </label>
-                              <label className="flex items-center gap-1">
-                                <input
-                                  type="checkbox"
-                                  checked={r.cleanup.effectiveRules.stripAddressBits}
-                                  onChange={() => toggleRowRule(r.id, "stripAddressBits")}
-                                  disabled={r.cleanup.rollback}
-                                />
-                                Adresse
-                              </label>
-                              <label className="flex items-center gap-1">
-                                <input
-                                  type="checkbox"
-                                  checked={r.cleanup.effectiveRules.titleCase}
-                                  onChange={() => toggleRowRule(r.id, "titleCase")}
-                                  disabled={r.cleanup.rollback}
-                                />
-                                Schreibweise
-                              </label>
+                        <td className="p-3 text-xs min-w-[290px]">
+                          <div className="grid gap-2 rounded-lg border border-[color:var(--bp-border)] bg-slate-50 p-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                className={`rounded-full border px-2 py-1 ${r.cleanup.rollback ? "border-pink-200 bg-pink-50 text-pink-700" : "border-[color:var(--bp-border)] bg-white"}`}
+                                onClick={() => toggleRowRollback(r.id)}
+                              >
+                                {r.cleanup.rollback ? "Original aktiv" : "Originaltext"}
+                              </button>
+                              <Button
+                                variant="outline"
+                                onClick={() => openEditor(r.id, r.description)}
+                                className="h-7 px-2 py-1 text-xs"
+                              >
+                                Bearbeiten
+                              </Button>
                             </div>
+
+                            <div className="flex flex-wrap gap-1">
+                              {(
+                                [
+                                  ["stripBookingWords", "Buchungswörter"],
+                                  ["stripIbanRefs", "IBAN/Referenzen"],
+                                  ["stripAddressBits", "Adressanteile"],
+                                  ["titleCase", "Schreibweise"],
+                                ] as Array<[CleanupRuleKey, string]>
+                              ).map(([ruleKey, label]) => {
+                                const active = !!r.cleanup.effectiveRules[ruleKey];
+                                return (
+                                  <button
+                                    key={`${r.id}-${ruleKey}`}
+                                    type="button"
+                                    disabled={r.cleanup.rollback}
+                                    onClick={() => toggleRowRule(r.id, ruleKey)}
+                                    className={`rounded-full border px-2 py-1 text-xs ${active ? "border-sky-200 bg-sky-50 text-sky-700" : "border-[color:var(--bp-border)] bg-white text-slate-600"} disabled:opacity-50`}
+                                  >
+                                    {label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+
                             <div className="flex flex-wrap gap-1">
                               {r.cleanup.rollback ? <Badge variant="pink">Original</Badge> : null}
                               {r.cleanup.manualEdit ? <Badge variant="pink">Manuell</Badge> : null}
                               {r.cleanup.changedRules.map((rule) => (
                                 <Badge key={`${r.id}-${rule}`} variant="blue">
-                                  {rule}
+                                  {cleanupRuleLabel(rule)}
                                 </Badge>
                               ))}
                               {!r.cleanup.rollback && !r.cleanup.manualEdit && !r.cleanup.changedRules.length ? (
