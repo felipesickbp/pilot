@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { AppShell } from "../components/shell";
 import { FlowStepper } from "../components/stepper";
 import { Badge, Button, Card, CardContent, CardHeader, Subhead } from "../components/ui";
-import { Send, Wand2 } from "lucide-react";
+import { Send, Trash2, Wand2 } from "lucide-react";
 import { type NormalizedRow, safeText } from "../importer";
 
 type Row = NormalizedRow;
@@ -136,7 +136,7 @@ export default function SpreadsheetPage() {
           vatAccount: "",
         },
       ]);
-      setToast("No imported rows found in session. Go to Upload and import a bank export file.");
+      setToast("Keine importierten Zeilen in der Session gefunden. Bitte zuerst eine Datei via Upload importieren.");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -162,12 +162,12 @@ export default function SpreadsheetPage() {
             setRules(Array.isArray(rulesData?.items) ? rulesData.items : []);
           }
           if (!accountsRes.ok && !rulesRes.ok) {
-            setToast("Could not load account plan / rules. You can still fill accounts manually.");
+            setToast("Kontenplan / Regeln konnten nicht geladen werden. Konten können manuell ergänzt werden.");
           }
         }
       } catch {
         if (!cancelled) {
-          setToast("Could not load account plan / rules. You can still fill accounts manually.");
+          setToast("Kontenplan / Regeln konnten nicht geladen werden. Konten können manuell ergänzt werden.");
         }
       } finally {
         if (!cancelled) setLoadingConfig(false);
@@ -244,6 +244,12 @@ export default function SpreadsheetPage() {
     persistRows(next);
   }
 
+  function deleteRow(id: string) {
+    const next = rows.filter((r) => r.id !== id);
+    persistRows(next);
+    setToast("Zeile gelöscht.");
+  }
+
   function accountSuggestions(query: string) {
     const q = safeText(query).toLowerCase();
     if (!q) return [] as AccountItem[];
@@ -301,7 +307,7 @@ export default function SpreadsheetPage() {
     setSubmitResults([]);
 
     if (!rows.length) {
-      setToast("No rows to submit.");
+      setToast("Keine Zeilen zum Senden vorhanden.");
       return;
     }
 
@@ -323,7 +329,7 @@ export default function SpreadsheetPage() {
       }));
 
     if (!postRows.length) {
-      setToast("No valid rows to submit.");
+      setToast("Keine gültigen Zeilen zum Senden vorhanden.");
       return;
     }
 
@@ -345,17 +351,17 @@ export default function SpreadsheetPage() {
 
       const data = await r.json().catch(() => ({}));
       if (!r.ok) {
-        const detail = data?.detail || "Submit failed.";
+        const detail = data?.detail || "Senden fehlgeschlagen.";
         throw new Error(String(detail));
       }
 
       const ok = Number(data?.ok_count || 0);
       const dry = Number(data?.dry_run_count || 0);
       const err = Number(data?.error_count || 0);
-      setSubmitSummary(`Finished. OK: ${ok}, Dry-run: ${dry}, Errors: ${err}`);
+      setSubmitSummary(`Fertig. OK: ${ok}, Dry-run: ${dry}, Fehler: ${err}`);
       setSubmitResults(Array.isArray(data?.results) ? data.results : []);
     } catch (e: any) {
-      setToast(e?.message || "Could not submit to Bexio.");
+      setToast(e?.message || "Konnte nicht an Bexio senden.");
     } finally {
       setSubmitting(false);
     }
@@ -364,9 +370,9 @@ export default function SpreadsheetPage() {
   return (
     <AppShell active="Upload">
       <div className="mb-6">
-        <div className="text-3xl font-semibold">Transaction Spreadsheet</div>
+        <div className="text-3xl font-semibold">Transaktions-Tabelle</div>
         <Subhead>
-          Review and complete counterpart accounts and VAT before posting to bexio.
+          Kontierung prüfen, fehlende Daten ergänzen und danach an bexio senden.
         </Subhead>
       </div>
 
@@ -382,17 +388,17 @@ export default function SpreadsheetPage() {
 
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
-          <div className="text-xl font-semibold">✨ Transaction Data</div>
+          <div className="text-xl font-semibold">✨ Transaktionsdaten</div>
           <Badge variant="blue">{fileTypeBadge}</Badge>
           {rules.length ? <Badge variant="pink">{rules.length} Buchungsregeln</Badge> : null}
         </div>
 
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => applyRulesToRows("manual")} disabled={applyingRules || !rules.length}>
-            <Wand2 className="h-4 w-4" /> {applyingRules ? "Applying..." : "Buchungsregeln anwenden"}
+            <Wand2 className="h-4 w-4" /> {applyingRules ? "Wende an..." : "Buchungsregeln anwenden"}
           </Button>
           <Button onClick={submitToBexio} disabled={submitting}>
-            <Send className="h-4 w-4" /> {submitting ? "Submitting..." : "Submit to Bexio"}
+            <Send className="h-4 w-4" /> {submitting ? "Sende..." : "An Bexio senden"}
           </Button>
         </div>
       </div>
@@ -401,12 +407,12 @@ export default function SpreadsheetPage() {
         <CardContent className="flex items-center justify-between py-6">
           <div>
             <div className="text-sm font-semibold">
-              {completedCount} of {rows.length} transactions completed
+              {completedCount} von {rows.length} Transaktionen vollständig kontiert
             </div>
             <div className="text-sm text-slate-500">
-              Missing Soll/Haben fields can be filled via autocomplete and Buchungsregeln.
+              Fehlende Soll/Haben-Konten können per Autocomplete und Buchungsregeln ergänzt werden.
             </div>
-            {loadingConfig ? <div className="mt-1 text-xs text-slate-500">Loading account plan and rules...</div> : null}
+            {loadingConfig ? <div className="mt-1 text-xs text-slate-500">Kontenplan und Regeln werden geladen...</div> : null}
           </div>
           <div className="w-40">
             <div className="h-2 rounded-full bg-slate-100">
@@ -428,19 +434,21 @@ export default function SpreadsheetPage() {
       <div className="mt-6">
         <Card>
           <CardHeader>
-            <div className="text-sm font-semibold">Transaction Data</div>
-            <Subhead>Edit transactions directly. Direction column is shown for CAMT clarity.</Subhead>
+            <div className="text-sm font-semibold">Transaktionsdaten</div>
+            <Subhead>Datum, Konten und MWST sind direkt bearbeitbar. Einzelne Zeilen können gelöscht werden.</Subhead>
           </CardHeader>
           <CardContent>
             <div className="overflow-auto rounded-xl border border-[color:var(--bp-border)] bg-white">
-              <table className="min-w-[1250px] w-full text-sm">
+              <table className="w-full table-fixed text-sm">
                 <thead className="bg-slate-50 text-slate-600">
                   <tr>
-                    {["Doc", "Date", "Description", "Amount", "Currency", "FX", "Dir", "Soll", "Haben", "VAT", "VAT Account"].map((h) => (
-                      <th key={h} className="p-3 text-left">
-                        {h}
-                      </th>
-                    ))}
+                    <th className="w-[130px] p-3 text-left">Datum</th>
+                    <th className="w-[38%] p-3 text-left">Beschreibung</th>
+                    <th className="w-[140px] p-3 text-left">Betrag</th>
+                    <th className="w-[140px] p-3 text-left">Soll</th>
+                    <th className="w-[140px] p-3 text-left">Haben</th>
+                    <th className="w-[120px] p-3 text-left">MWST</th>
+                    <th className="w-[90px] p-3 text-left">Aktion</th>
                   </tr>
                 </thead>
 
@@ -451,35 +459,29 @@ export default function SpreadsheetPage() {
                     return (
                       <tr key={r.id} className="border-t border-[color:var(--bp-border)]">
                         <td className="p-3">
-                          <div className="rounded-lg border border-[color:var(--bp-border)] bg-sky-50 px-2 py-1">{r.id}</div>
+                          <div className="rounded-lg border border-[color:var(--bp-border)] bg-white px-2 py-1">
+                            <input
+                              type="date"
+                              className="w-full bg-transparent outline-none"
+                              value={r.date}
+                              onChange={(e) => updateRow(r.id, { date: e.target.value })}
+                            />
+                          </div>
                         </td>
 
                         <td className="p-3">
-                          <div className="rounded-lg border border-[color:var(--bp-border)] bg-sky-50 px-2 py-1">{r.date}</div>
-                        </td>
-
-                        <td className="p-3">
-                          <div className="rounded-lg border border-[color:var(--bp-border)] bg-sky-50 px-2 py-1">
+                          <div className="rounded-lg border border-[color:var(--bp-border)] bg-white px-2 py-1 break-words">
                             {r.description}
                           </div>
                         </td>
 
                         <td className="p-3">
-                          <div className="rounded-lg border border-[color:var(--bp-border)] bg-sky-50 px-2 py-1">
+                          <div className="rounded-lg border border-[color:var(--bp-border)] bg-white px-2 py-1">
                             {Math.abs(Number(r.amount)).toFixed(2)}
+                            <div className="mt-1">
+                              <Badge variant={r.direction === "DBIT" ? "pink" : "blue"}>{r.direction || "—"}</Badge>
+                            </div>
                           </div>
-                        </td>
-
-                        <td className="p-3">
-                          <div className="rounded-lg border border-[color:var(--bp-border)] bg-sky-50 px-2 py-1">{r.currency}</div>
-                        </td>
-
-                        <td className="p-3">
-                          <div className="rounded-lg border border-[color:var(--bp-border)] bg-sky-50 px-2 py-1">{r.fx}</div>
-                        </td>
-
-                        <td className="p-3">
-                          <Badge variant={r.direction === "DBIT" ? "pink" : "blue"}>{r.direction || "—"}</Badge>
                         </td>
 
                         <td className="p-3">{accountCell(r, "sollAccount")}</td>
@@ -497,14 +499,15 @@ export default function SpreadsheetPage() {
                           </div>
                         </td>
                         <td className="p-3">
-                          <div className="rounded-lg border border-[color:var(--bp-border)] bg-white px-2 py-1">
-                            <input
-                              className="w-full bg-transparent outline-none"
-                              placeholder="e.g. 2200"
-                              value={r.vatAccount || ""}
-                              onChange={(e) => updateRow(r.id, { vatAccount: e.target.value })}
-                            />
-                          </div>
+                          <Button
+                            variant="outline"
+                            onClick={() => deleteRow(r.id)}
+                            title="Zeile löschen"
+                            aria-label="Zeile löschen"
+                            className="h-9 px-3"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </td>
                       </tr>
                     );
@@ -514,7 +517,7 @@ export default function SpreadsheetPage() {
             </div>
 
             <div className="mt-3 text-xs text-slate-500">
-              Next: “Submit to Bexio” will call backend API (validate → map accounts/VAT → post).
+              Nächster Schritt: “An Bexio senden” ruft die Backend-API auf (validieren → mappen → buchen).
             </div>
             {submitSummary ? <div className="mt-3 text-sm font-medium text-slate-700">{submitSummary}</div> : null}
             {submitResults.length ? (
@@ -522,7 +525,7 @@ export default function SpreadsheetPage() {
                 <table className="min-w-[700px] w-full text-sm">
                   <thead className="bg-slate-50 text-slate-600">
                     <tr>
-                      {["Row", "CSV Row", "Status", "ID", "Ref", "Error"].map((h) => (
+                      {["Zeile", "CSV-Zeile", "Status", "ID", "Ref", "Fehler"].map((h) => (
                         <th key={h} className="p-2 text-left">
                           {h}
                         </th>
