@@ -338,6 +338,11 @@ class PasswordResetConfirmRequest(BaseModel):
     new_password: str
 
 
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
 def _create_and_send_challenge(*, user_id: str, email: str, purpose: str) -> Dict[str, Any]:
     latest = get_latest_open_challenge_for_email(db_engine, email=email, purpose=purpose)
     if latest and not latest.get("used_at") and _parse_iso(str(latest.get("expires_at") or "")) > _utc_now():
@@ -562,6 +567,46 @@ def auth_password_reset_confirm(payload: PasswordResetConfirmRequest, request: R
         password_hash=_password_hash(new_password),
     )
     insert_auth_audit(db_engine, event="password_reset_confirm", email=email, ip=ip, success=True)
+    return {"ok": True}
+
+
+@app.post("/auth/password/change")
+def auth_password_change(payload: PasswordChangeRequest, request: Request, response: Response) -> Dict[str, Any]:
+    _require_csrf(request)
+    sess = _get_auth_session_or_401(request)
+    email = _normalize_email(str(sess.get("email") or ""))
+    ip = _client_ip(request)
+    _check_rate_limit(bucket=f"pwd_change:ip:{ip}", limit=20, window_seconds=900)
+    _check_rate_limit(bucket=f"pwd_change:email:{email}", limit=10, window_seconds=900)
+
+    current_password = str(payload.current_password or "")
+    new_password = str(payload.new_password or "")
+    if len(new_password) < 10:
+        insert_auth_audit(db_engine, event="password_change", email=email, ip=ip, success=False, detail="weak_password")
+        raise HTTPException(status_code=400, detail="Password must be at least 10 characters.")
+
+    user = get_user_by_email(db_engine, email=email)
+    if not user or not _password_verify(current_password, str(user.get("password_hash") or "")):
+        insert_auth_audit(db_engine, event="password_change", email=email, ip=ip, success=False, detail="invalid_current")
+        raise HTTPException(status_code=401, detail="Current password is incorrect.")
+    if _password_verify(new_password, str(user.get("password_hash") or "")):
+        insert_auth_audit(db_engine, event="password_change", email=email, ip=ip, success=False, detail="same_as_old")
+        raise HTTPException(status_code=400, detail="New password must be different from current password.")
+
+    update_user_password(db_engine, user_id=str(user.get("user_id") or ""), password_hash=_password_hash(new_password))
+
+    # Rotate auth session after credential change.
+    old_sid = request.cookies.get(AUTH_SESSION_COOKIE, "")
+    if old_sid:
+        delete_auth_session(db_engine, session_id=old_sid)
+    new_sess = create_auth_session(
+        db_engine,
+        user_id=str(user.get("user_id") or ""),
+        email=email,
+        expires_at=_iso(_utc_now() + timedelta(hours=AUTH_SESSION_TTL_HOURS)),
+    )
+    _set_auth_cookie(response, request, str(new_sess["session_id"]))
+    insert_auth_audit(db_engine, event="password_change", email=email, ip=ip, success=True)
     return {"ok": True}
 
 

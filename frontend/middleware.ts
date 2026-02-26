@@ -18,6 +18,7 @@ const APP_PATHS = [
   "/history",
   "/complete",
   "/clients",
+  "/settings",
 ];
 
 const APP_PUBLIC_PATHS = new Set(["/login", "/terms"]);

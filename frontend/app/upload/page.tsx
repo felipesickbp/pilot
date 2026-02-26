@@ -10,7 +10,6 @@ import {
   Card,
   CardContent,
   CardHeader,
-  Select,
   Subhead,
   Input,
 } from "../components/ui";
@@ -26,6 +25,7 @@ import {
 
 export default function UploadPage() {
   const router = useRouter();
+  const apiBase = useMemo(() => process.env.NEXT_PUBLIC_API_BASE || "/api", []);
 
   const [bankAccount, setBankAccount] = useState("1020");
   const [vatMode, setVatMode] = useState<"with" | "without">("with");
@@ -33,6 +33,27 @@ export default function UploadPage() {
   const [candidateCount, setCandidateCount] = useState(0);
   const [bestSummary, setBestSummary] = useState<string>("");
   const [error, setError] = useState("");
+  const [clientName, setClientName] = useState("");
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`${apiBase}/bexio/session`, {
+          method: "GET",
+          credentials: "include",
+        });
+        if (!r.ok) return;
+        const data = (await r.json()) as { connected?: boolean; client_name?: string };
+        if (!cancelled) {
+          setClientName(data.connected ? String(data.client_name || "") : "");
+        }
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBase]);
 
   const summary = useMemo(() => {
     if (!candidateCount) return null;
@@ -106,10 +127,10 @@ export default function UploadPage() {
 
           <CardContent className="grid gap-4">
             <div className="grid gap-2">
-              <div className="text-xs font-semibold text-slate-600">Bexio Client (demo)</div>
-              <Select defaultValue="muster" disabled>
-                <option value="muster">Muster Klient</option>
-              </Select>
+              <div className="text-xs font-semibold text-slate-600">Connected bexio company</div>
+              <div className="h-10 rounded-xl border border-[color:var(--bp-border)] bg-slate-50 px-3 text-sm text-slate-700 flex items-center">
+                {clientName || "Not connected"}
+              </div>
             </div>
 
             <div className="grid gap-2">

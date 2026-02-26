@@ -3,6 +3,7 @@
 import Link from "next/link";
 import clsx from "clsx";
 import React, { useEffect, useMemo, useState } from "react";
+import { Settings } from "lucide-react";
 
 const nav = [
   { href: "/dashboard", label: "Dashboard" },
@@ -26,16 +27,25 @@ export function AppShell({
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-fuchsia-500 to-blue-500 text-white">
-              {/* simple logo block */}
               <span className="text-sm font-bold">BP</span>
             </div>
             <div>
-              <div className="text-sm font-semibold">BexioFlow</div>
-              <div className="text-xs text-slate-500">Transaction Processing</div>
+              <div className="text-sm font-semibold">Pilot</div>
+              <div className="text-xs text-slate-500">Intelligent Accounting Workflow</div>
             </div>
           </div>
 
-          <BexioConnectButton />
+          <div className="flex items-center gap-2">
+            <Link
+              href="/settings"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[color:var(--bp-border)] bg-white text-slate-600 hover:bg-slate-50"
+              title="Settings"
+              aria-label="Settings"
+            >
+              <Settings className="h-4 w-4" />
+            </Link>
+            <BexioConnectButton />
+          </div>
         </div>
       </header>
 
@@ -44,10 +54,10 @@ export function AppShell({
         {/* hero */}
         <div className="mb-6">
           <h1 className="text-4xl font-semibold tracking-tight">
-            Bexio Transaction Processing
+            Pilot Workspace
           </h1>
           <p className="mt-2 text-sm text-slate-500">
-            Upload, process, and manage financial transactions for seamless Bexio integration
+            Upload, classify, and import transactions with intelligent rules for Bexio
           </p>
         </div>
 

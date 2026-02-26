@@ -13,11 +13,11 @@ function Header() {
   return (
     <header className="topbar">
       <div className="container topbar-inner">
-        <a className="brand" href="#top" aria-label="bp-pilot home">
-          <span className="brand-mark" />
+        <a className="brand" href="#top" aria-label="Pilot home">
+          <span className="brand-mark">BP</span>
           <span className="brand-text">
-            <span className="brand-name">bp-pilot</span>
-            <span className="brand-sub">finance ops</span>
+            <span className="brand-name">Pilot</span>
+            <span className="brand-sub">Intelligent Finance Workflow</span>
           </span>
         </a>
 
@@ -30,9 +30,6 @@ function Header() {
           </a>
           <a href="#resources" className="navlink">
             Ressourcen
-          </a>
-          <a href="#pricing" className="navlink">
-            Preise
           </a>
         </nav>
 
@@ -97,13 +94,13 @@ function Hero() {
           </span>
 
           <h1 className="h1">
-            Finanzprozesse, die
-            <span className="h1-accent">reibungslos laufen.</span>
+            Bankauszüge intelligent verarbeiten.
+            <span className="h1-accent">Buchhaltung schneller abschliessen.</span>
           </h1>
 
           <p className="lead">
-            Ein Workflow für Upload → Preview → Spreadsheet. Automatisiere Dokumente, extrahiere Daten und bring Struktur
-            in deine Abschlussarbeit.
+            Pilot verbindet Import, Bereinigung, Buchungsregeln und Kontierung in einem Ablauf. Weniger manuelle
+            Klicks, weniger Fehler, mehr Tempo für Treuhand und Finance-Teams.
           </p>
 
           <div className="hero-actions">
@@ -148,16 +145,12 @@ function Hero() {
 }
 
 function LogoRow() {
-  const logos = ["Kunden A", "Kunden B", "Kunden C", "Kunden D", "Kunden E", "Kunden F"];
   return (
     <section className="logos">
       <div className="container">
-        <p className="muted center">Teams nutzen bp-pilot, um schneller und konsistenter zu arbeiten.</p>
-        <div className="logos-grid" aria-label="logos">
-          {logos.map((l) => (
-            <div key={l} className="logo-pill" title={l} />
-          ))}
-        </div>
+        <p className="muted center">
+          Für Schweizer Treuhand und Buchhaltungs-Teams: strukturierte Transaktionsdaten statt Copy-Paste-Chaos.
+        </p>
       </div>
     </section>
   );
@@ -237,25 +230,22 @@ function CtaBand() {
         <div>
           <h3 className="h2 invert">Alles im Blick – jederzeit.</h3>
           <p className="muted invert">
-            Starte mit einem Dokument und lande in einer strukturierten Tabelle. Ideal für Treuhand, Buchhaltung und
-            interne Finance-Teams.
+            Von unstrukturierten Bankdaten zu einer klaren, buchbaren Tabelle mit wiederverwendbaren Buchungsregeln.
           </p>
           <div className="cta-actions">
             <a className="btn btn-primary" href="https://app.bp-pilot.ch/upload">
               Upload starten
             </a>
-            <a className="btn btn-outline" href="#pricing">
-              Preise
+            <a className="btn btn-outline" href="https://app.bp-pilot.ch/login">
+              Login
             </a>
           </div>
         </div>
 
         <div className="cta-card">
-          <div className="cta-blank" />
-          <div className="cta-mini">
-            <div className="cta-chip" />
-            <div className="cta-chip" />
-          </div>
+          <div className="cta-point">Automatische Erkennung von Spalten und Betragslogik</div>
+          <div className="cta-point">Buchungsregeln pro Mandant wiederverwenden</div>
+          <div className="cta-point">Direkte Vorbereitung für den Bexio-Import</div>
         </div>
       </div>
     </section>
@@ -268,10 +258,10 @@ function Footer() {
       <div className="container footer-inner">
         <div>
           <div className="footer-brand">
-            <span className="brand-mark" />
-            <strong>bp-pilot</strong>
+            <span className="brand-mark">BP</span>
+            <strong>Pilot</strong>
           </div>
-          <p className="muted">Dokumente → Daten → Abschluss. In einem klaren Workflow.</p>
+          <p className="muted">Intelligente Bankdaten-Verarbeitung für schnellere Buchhaltungsprozesse.</p>
         </div>
 
         <div>
@@ -281,9 +271,6 @@ function Footer() {
           </a>
           <a className="footer-link" href="#solutions">
             Use Cases
-          </a>
-          <a className="footer-link" href="#pricing">
-            Preise
           </a>
         </div>
 
@@ -311,7 +298,7 @@ function Footer() {
         </div>
       </div>
 
-      <div className="footer-bottom">© {new Date().getFullYear()} bp-pilot. All rights reserved.</div>
+      <div className="footer-bottom">© {new Date().getFullYear()} Pilot. All rights reserved.</div>
     </footer>
   );
 }
@@ -332,11 +319,11 @@ export default function LandingPage() {
 
         <FeatureBlock
           kicker="UPLOAD"
-          title="Schnell Dokumente erfassen"
-          description="Drag & drop, klare Struktur und ein sauberer Audit-Trail."
+          title="Dateien hochladen und strukturiert starten"
+          description="CSV, XLSX oder CAMT importieren und direkt mit einer robusten Datengrundlage weiterarbeiten."
           bullets={[
-            { title: "Mehrere Dateien", text: "Arbeite mit Stapeln statt Einzeluploads." },
-            { title: "Saubere Ordnung", text: "Pro Mandant, Projekt oder Periode organisieren." },
+            { title: "Bank-unabhängig", text: "Variierende Spalten und Bezeichnungen werden zuverlässig erkannt." },
+            { title: "Mandantenkontext", text: "Verarbeitung direkt im verbundenen Bexio-Mandanten." },
           ]}
           primary={{ label: "Upload öffnen", href: "https://app.bp-pilot.ch/upload" }}
           secondary={{ label: "Preview ansehen", href: "https://app.bp-pilot.ch/preview" }}
@@ -346,11 +333,11 @@ export default function LandingPage() {
 
         <FeatureBlock
           kicker="PREVIEW"
-          title="Extrahieren, prüfen, korrigieren"
-          description="Bevor etwas ins Spreadsheet geht: schnelle Plausibilisierung."
+          title="Transaktionen prüfen und bereinigen"
+          description="Buchungstexte normalisieren, Betragsstruktur kontrollieren und Datenqualität sichern."
           bullets={[
-            { title: "Felder & Werte", text: "Datum, Total, Lieferant, Währung — alles im Blick." },
-            { title: "Kontrollschritte", text: "Einfacher Workflow für QA und Freigaben." },
+            { title: "Klare Betragslogik", text: "Soll/Haben-ready mit absoluten Werten für den Import." },
+            { title: "Cleanup-Regeln", text: "Wiederkehrende Textmuster automatisch entfernen." },
           ]}
           primary={{ label: "Preview öffnen", href: "https://app.bp-pilot.ch/preview" }}
           secondary={{ label: "In Tabelle", href: "https://app.bp-pilot.ch/spreadsheet" }}
@@ -361,24 +348,17 @@ export default function LandingPage() {
 
         <FeatureBlock
           kicker="SPREADSHEET"
-          title="Tabelle statt Chaos"
-          description="Exportierbare Struktur für Buchhaltung, Reporting und Abschluss."
+          title="Buchungsregeln anwenden und kontieren"
+          description="Vorschläge für Konten und automatische Zuordnung auf Basis bestehender Regeln."
           bullets={[
-            { title: "Einheitliche Spalten", text: "Konsistente Daten für Monatsabschluss und Reviews." },
-            { title: "Export-ready", text: "CSV/XLSX-Anbindung später — UI ist vorbereitet." },
+            { title: "Schnellere Kontierung", text: "Kontonummer oder Kontoname suchen und direkt übernehmen." },
+            { title: "Weniger Handarbeit", text: "Buchungsregeln füllen Soll/Haben automatisiert vor." },
           ]}
           primary={{ label: "Spreadsheet öffnen", href: "https://app.bp-pilot.ch/spreadsheet" }}
           secondary={{ label: "Login", href: "https://app.bp-pilot.ch/login" }}
           imageSrc={PREVIEWS.spreadsheet}
           imageAlt="Spreadsheet Screenshot"
         />
-
-        <div id="pricing" className="container section-head" style={{ paddingTop: 24 }}>
-          <h2 className="h2 center">Preise</h2>
-          <p className="muted center">
-            Platzhalter — sobald du willst, bauen wir eine Pricing Table (amnis-style) + FAQ + CTA.
-          </p>
-        </div>
 
         <CtaBand />
       </main>
