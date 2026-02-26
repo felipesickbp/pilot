@@ -617,19 +617,19 @@ function parseCamtXml(xml: string, bankAccount: string): NormalizedRow[] {
 
     if (!date || !currency || !Number.isFinite(amount)) continue;
 
-    const signed = direction === "DBIT" ? -Math.abs(amount) : Math.abs(amount);
+    const normalizedAmount = Math.abs(amount);
 
     rows.push({
       id: `DI${String(i + 1).padStart(4, "0")}`,
       date,
       description,
-      amount: signed,
+      amount: normalizedAmount,
       currency,
       fx: 1,
       direction,
       // Bank account logic: inflow -> Soll, outflow -> Haben
-      sollAccount: signed > 0 ? bankAccount : "",
-      habenAccount: signed < 0 ? bankAccount : "",
+      sollAccount: direction === "CRDT" ? bankAccount : "",
+      habenAccount: direction === "DBIT" ? bankAccount : "",
       vatCode: "",
     });
   }
@@ -714,12 +714,10 @@ function detectBankTemplate(candidate: ParsedTableCandidate): PreviewMapping["ba
   const looksUBS = headers.some((h) =>
     ["Abschlussdatum", "Buchungsdatum", "Belastung", "Gutschrift", "Einzelbetrag"].includes(h)
   );
-  const looksAcrevis = headers.some((h) => ["Buchungstext", "Betrag", "Valuta"].includes(h));
 
   let bankTemplate: PreviewMapping["bankTemplate"] = "generic";
   if (looksUBS) bankTemplate = "ubs";
   else if (isHeaderless) bankTemplate = "clientis";
-  else if (looksAcrevis) bankTemplate = "acrevis";
   return bankTemplate;
 }
 
@@ -910,7 +908,7 @@ export function normalizeRows(
       .filter(Boolean);
 
     const description = descParts.join(" | ");
-    const { amount, diagnostics } = resolveAmount(row, mapping, currentSummarySign);
+    const { amount: signedAmount, diagnostics } = resolveAmount(row, mapping, currentSummarySign);
 
     const currency = mapping.currencyColumn
       ? safeText(row[mapping.currencyColumn] || "") || "CHF"
@@ -922,8 +920,8 @@ export function normalizeRows(
       currentSummaryDate = parsedDate;
     }
 
-    if (isSummary && amount !== 0) {
-      currentSummarySign = amount > 0 ? 1 : -1;
+    if (isSummary && signedAmount !== 0) {
+      currentSummarySign = signedAmount > 0 ? 1 : -1;
     }
 
     if (mapping.dropSummaryRows && isSummary) {
@@ -935,9 +933,10 @@ export function normalizeRows(
     const date =
       parsedDate || (mapping.bankTemplate === "ubs" && currentSummaryDate ? currentSummaryDate : "");
 
-    if (!date && !description && !amount) continue;
+    if (!date && !description && !signedAmount) continue;
 
-    const direction: "CRDT" | "DBIT" = amount < 0 ? "DBIT" : "CRDT";
+    const direction: "CRDT" | "DBIT" = signedAmount < 0 ? "DBIT" : "CRDT";
+    const amount = Math.abs(signedAmount);
 
     out.push({
       id: `DI${String(out.length + 1).padStart(4, "0")}`,
@@ -950,8 +949,8 @@ export function normalizeRows(
       // Swiss accounting wording:
       // cash inflow -> bank in Soll
       // cash outflow -> bank in Haben
-      sollAccount: amount > 0 ? bankAccount : "",
-      habenAccount: amount < 0 ? bankAccount : "",
+      sollAccount: direction === "CRDT" ? bankAccount : "",
+      habenAccount: direction === "DBIT" ? bankAccount : "",
       vatCode: "",
       amountDiagnostics: diagnostics,
       originalRow: row,
@@ -967,7 +966,8 @@ function toTitleCase(s: string) {
 
 export function cleanDescriptionWithDiagnostics(
   raw: string,
-  opts: CleanupRuleOptions
+  opts: CleanupRuleOptions,
+  customRemovals: string[] = []
 ): CleanupResult {
   let s = safeText(raw);
   const changed = new Set<CleanupRuleKey>();
@@ -1005,7 +1005,17 @@ export function cleanDescriptionWithDiagnostics(
     if (s !== before) changed.add("stripAddressBits");
   }
 
+  if (customRemovals.length) {
+    for (const item of customRemovals) {
+      const needle = safeText(item);
+      if (!needle) continue;
+      const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      s = s.replace(new RegExp(escaped, "gi"), " ");
+    }
+  }
+
   s = s.replace(/\s{2,}/g, " ").replace(/\s+,/g, ",").trim();
+  s = s.replace(/^[:;,\-|]+\s*/, "").trim();
   s = s.replace(/[|;,-]\s*$/g, "").trim();
 
   if (opts.titleCase && /[A-ZÄÖÜ]{4,}/.test(raw || "")) {
@@ -1022,7 +1032,8 @@ export function cleanDescriptionWithDiagnostics(
 
 export function cleanDescription(
   raw: string,
-  opts: CleanupRuleOptions
+  opts: CleanupRuleOptions,
+  customRemovals: string[] = []
 ) {
-  return cleanDescriptionWithDiagnostics(raw, opts).text;
+  return cleanDescriptionWithDiagnostics(raw, opts, customRemovals).text;
 }

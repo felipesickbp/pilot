@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppShell } from "../components/shell";
 import { FlowStepper } from "../components/stepper";
-import { Badge, Button, Card, CardContent, CardHeader, Subhead } from "../components/ui";
+import { Badge, Button, Card, CardContent, CardHeader, Input, Subhead } from "../components/ui";
 import {
   PREVIEW_META_KEY,
   PREVIEW_ROWS_KEY,
@@ -14,6 +14,7 @@ import {
   type CleanupRuleOptions,
   type NormalizedRow,
   cleanDescriptionWithDiagnostics,
+  safeText,
 } from "../importer";
 
 export default function CleanupPage() {
@@ -27,8 +28,13 @@ export default function CleanupPage() {
   const [stripIbanRefs, setStripIbanRefs] = useState(true);
   const [stripAddressBits, setStripAddressBits] = useState(true);
   const [titleCase, setTitleCase] = useState(true);
+  const [customRemovals, setCustomRemovals] = useState<string[]>([]);
+  const [customDraft, setCustomDraft] = useState("");
   const [rowRuleOverrides, setRowRuleOverrides] = useState<Record<string, Partial<CleanupRuleOptions>>>({});
   const [rowRollback, setRowRollback] = useState<Record<string, boolean>>({});
+  const [manualEdits, setManualEdits] = useState<Record<string, string>>({});
+  const [editingRowId, setEditingRowId] = useState<string>("");
+  const [editDraft, setEditDraft] = useState("");
 
   useEffect(() => {
     try {
@@ -69,18 +75,23 @@ export default function CleanupPage() {
             titleCase: false,
           }
         : { ...globalRules, ...overrides };
-      const result = cleanDescriptionWithDiagnostics(r.description, effectiveRules);
+
+      const cleaned = cleanDescriptionWithDiagnostics(r.description, effectiveRules, customRemovals);
+      const manual = safeText(manualEdits[r.id] || "");
+      const finalDescription = rollback ? r.description : manual || cleaned.text;
+
       return {
         ...r,
-        description: rollback ? r.description : result.text,
+        description: finalDescription,
         cleanup: {
           rollback,
           effectiveRules,
-          changedRules: rollback ? [] : result.changedRules,
+          changedRules: rollback ? [] : cleaned.changedRules,
+          manualEdit: !!manual,
         },
       };
     });
-  }, [rows, globalRules, rowRuleOverrides, rowRollback]);
+  }, [rows, globalRules, rowRuleOverrides, rowRollback, customRemovals, manualEdits]);
 
   function toggleRowRollback(id: string) {
     setRowRollback((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -108,6 +119,39 @@ export default function CleanupPage() {
     });
   }
 
+  function addCustomRemoval() {
+    const value = safeText(customDraft);
+    if (!value) return;
+    if (customRemovals.includes(value)) {
+      setCustomDraft("");
+      return;
+    }
+    setCustomRemovals((prev) => [...prev, value]);
+    setCustomDraft("");
+  }
+
+  function removeCustomRemoval(value: string) {
+    setCustomRemovals((prev) => prev.filter((x) => x !== value));
+  }
+
+  function openEditor(rowId: string, value: string) {
+    setEditingRowId(rowId);
+    setEditDraft(value || "");
+  }
+
+  function saveEditor() {
+    if (!editingRowId) return;
+    const value = safeText(editDraft);
+    setManualEdits((prev) => {
+      const next = { ...prev };
+      if (value) next[editingRowId] = value;
+      else delete next[editingRowId];
+      return next;
+    });
+    setEditingRowId("");
+    setEditDraft("");
+  }
+
   function goSpreadsheet() {
     if (!cleanedRows.length) return;
     const finalRows = cleanedRows.map(({ cleanup, ...row }) => row);
@@ -119,13 +163,16 @@ export default function CleanupPage() {
         ...(meta || {}),
         cleanup: {
           globalRules,
+          customRemovals,
           rowRuleOverrides,
           rowRollback,
+          manualEdits,
           changedRows: cleanedRows
-            .filter((r) => r.cleanup.changedRules.length > 0 || r.cleanup.rollback)
+            .filter((r) => r.cleanup.changedRules.length > 0 || r.cleanup.rollback || r.cleanup.manualEdit)
             .map((r) => ({
               id: r.id,
               rollback: r.cleanup.rollback,
+              manualEdit: r.cleanup.manualEdit,
               changedRules: r.cleanup.changedRules,
             })),
         },
@@ -141,7 +188,7 @@ export default function CleanupPage() {
       <div className="mb-6">
         <div className="text-3xl font-semibold">Cleanup</div>
         <Subhead>
-          Clean descriptions before Spreadsheet: remove booking noise, IBANs, references, addresses, and all-caps.
+          Clean descriptions before Spreadsheet, then manually adjust individual rows when needed.
         </Subhead>
       </div>
 
@@ -203,6 +250,37 @@ export default function CleanupPage() {
                 Convert ALL CAPS text to normal title case
               </label>
 
+              <div className="grid gap-2 rounded-xl border border-[color:var(--bp-border)] p-3">
+                <div className="text-xs font-semibold text-slate-600">Add cleanup rule (global)</div>
+                <div className="flex gap-2">
+                  <Input
+                    value={customDraft}
+                    onChange={(e) => setCustomDraft(e.target.value)}
+                    placeholder='Text to remove everywhere, e.g. ": "'
+                  />
+                  <Button variant="outline" onClick={addCustomRemoval}>
+                    Add
+                  </Button>
+                </div>
+                {customRemovals.length ? (
+                  <div className="flex flex-wrap gap-2">
+                    {customRemovals.map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        className="rounded-full border border-[color:var(--bp-border)] bg-white px-2 py-1 text-xs"
+                        onClick={() => removeCustomRemoval(r)}
+                        title="Click to remove rule"
+                      >
+                        {r} ×
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-xs text-slate-500">No custom rules yet.</div>
+                )}
+              </div>
+
               <Button className="w-full" onClick={goSpreadsheet} disabled={!cleanedRows.length}>
                 Continue to Spreadsheet →
               </Button>
@@ -237,7 +315,7 @@ export default function CleanupPage() {
                         <td className="p-3 text-xs text-slate-500">{rows[idx]?.description || "—"}</td>
                         <td className="p-3">{r.description}</td>
                         <td className="p-3">
-                          <Badge variant="pink">{r.amount.toFixed(2)}</Badge>
+                          <Badge variant="pink">{Math.abs(r.amount).toFixed(2)}</Badge>
                         </td>
                         <td className="p-3 text-xs">
                           <div className="grid gap-2">
@@ -249,6 +327,13 @@ export default function CleanupPage() {
                               />
                               Use original text
                             </label>
+                            <Button
+                              variant="outline"
+                              onClick={() => openEditor(r.id, r.description)}
+                              className="h-8 px-3 py-1"
+                            >
+                              Edit text
+                            </Button>
                             <div className="grid grid-cols-2 gap-1">
                               <label className="flex items-center gap-1">
                                 <input
@@ -289,12 +374,13 @@ export default function CleanupPage() {
                             </div>
                             <div className="flex flex-wrap gap-1">
                               {r.cleanup.rollback ? <Badge variant="pink">rollback</Badge> : null}
+                              {r.cleanup.manualEdit ? <Badge variant="pink">manual edit</Badge> : null}
                               {r.cleanup.changedRules.map((rule) => (
                                 <Badge key={`${r.id}-${rule}`} variant="blue">
                                   {rule}
                                 </Badge>
                               ))}
-                              {!r.cleanup.rollback && !r.cleanup.changedRules.length ? (
+                              {!r.cleanup.rollback && !r.cleanup.manualEdit && !r.cleanup.changedRules.length ? (
                                 <span className="text-slate-400">no changes</span>
                               ) : null}
                             </div>
@@ -316,6 +402,39 @@ export default function CleanupPage() {
           </Card>
         </div>
       )}
+
+      {editingRowId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <Card className="w-full max-w-2xl">
+            <CardHeader>
+              <div className="text-sm font-semibold">Edit Cleaned Text</div>
+              <Subhead>Override cleanup output for this row.</Subhead>
+            </CardHeader>
+            <CardContent className="grid gap-3">
+              <textarea
+                className="min-h-[140px] w-full rounded-xl border border-[color:var(--bp-border)] p-3 text-sm outline-none focus:ring-2 focus:ring-fuchsia-200"
+                value={editDraft}
+                onChange={(e) => setEditDraft(e.target.value)}
+              />
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setEditingRowId("")}>Cancel</Button>
+                <Button variant="outline" onClick={() => {
+                  setManualEdits((prev) => {
+                    const next = { ...prev };
+                    delete next[editingRowId];
+                    return next;
+                  });
+                  setEditingRowId("");
+                  setEditDraft("");
+                }}>
+                  Clear override
+                </Button>
+                <Button onClick={saveEditor}>Save text</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
     </AppShell>
   );
 }
