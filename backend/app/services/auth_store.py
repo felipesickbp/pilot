@@ -44,6 +44,17 @@ def init_auth_schema(engine: Engine) -> None:
       last_seen_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions (user_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS auth_audit_log (
+      log_id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      event TEXT NOT NULL,
+      email TEXT,
+      ip TEXT,
+      success INTEGER NOT NULL DEFAULT 0,
+      detail TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_auth_audit_created ON auth_audit_log (created_at DESC);
     """
     with engine.begin() as conn:
         for stmt in [s.strip() for s in ddl.split(";") if s.strip()]:
@@ -111,6 +122,20 @@ def set_user_verified(engine: Engine, *, user_id: str) -> None:
         )
 
 
+def update_user_password(engine: Engine, *, user_id: str, password_hash: str) -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                UPDATE auth_users
+                SET password_hash = :password_hash
+                WHERE user_id = :user_id
+                """
+            ),
+            {"password_hash": str(password_hash), "user_id": str(user_id)},
+        )
+
+
 def create_email_challenge(
     engine: Engine,
     *,
@@ -158,6 +183,30 @@ def get_email_challenge(engine: Engine, *, challenge_id: str) -> Optional[Dict[s
                 """
             ),
             {"challenge_id": str(challenge_id)},
+        ).mappings().first()
+    return dict(row) if row else None
+
+
+def get_latest_open_challenge_for_email(
+    engine: Engine,
+    *,
+    email: str,
+    purpose: str,
+) -> Optional[Dict[str, Any]]:
+    with engine.begin() as conn:
+        row = conn.execute(
+            text(
+                """
+                SELECT challenge_id, user_id, email, purpose, code_hash, expires_at, attempts, used_at, created_at
+                FROM auth_email_challenges
+                WHERE lower(email) = lower(:email)
+                  AND purpose = :purpose
+                  AND used_at IS NULL
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            ),
+            {"email": str(email), "purpose": str(purpose)},
         ).mappings().first()
     return dict(row) if row else None
 
@@ -255,4 +304,37 @@ def delete_auth_session(engine: Engine, *, session_id: str) -> None:
         conn.execute(
             text("DELETE FROM auth_sessions WHERE session_id = :session_id"),
             {"session_id": str(session_id)},
+        )
+
+
+def insert_auth_audit(
+    engine: Engine,
+    *,
+    event: str,
+    email: str,
+    ip: str,
+    success: bool,
+    detail: str = "",
+) -> None:
+    item = {
+        "log_id": str(uuid.uuid4()),
+        "created_at": _now_iso(),
+        "event": str(event),
+        "email": str(email or ""),
+        "ip": str(ip or ""),
+        "success": 1 if success else 0,
+        "detail": str(detail or ""),
+    }
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO auth_audit_log (
+                  log_id, created_at, event, email, ip, success, detail
+                ) VALUES (
+                  :log_id, :created_at, :event, :email, :ip, :success, :detail
+                )
+                """
+            ),
+            item,
         )

@@ -9,12 +9,14 @@ import re
 import hmac
 import hashlib
 import smtplib
+import threading
 from datetime import date as dt_date, datetime, timedelta, timezone
 from email.message import EmailMessage
 from urllib.parse import urlencode
 from typing import Any, Dict, List, Tuple, Optional
 
 import chardet
+import bcrypt
 import pandas as pd
 import requests
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Response, Query
@@ -44,11 +46,14 @@ from app.services.auth_store import (
     delete_auth_session,
     get_auth_session,
     get_email_challenge,
+    get_latest_open_challenge_for_email,
     get_user_by_email,
     increment_challenge_attempts,
     init_auth_schema,
+    insert_auth_audit,
     mark_challenge_used,
     set_user_verified,
+    update_user_password,
     touch_auth_session,
 )
 
@@ -88,9 +93,11 @@ def clients():
 # ------------------------------------------------------------
 
 AUTH_SESSION_COOKIE = "bp_auth_sid"
-AUTH_SESSION_TTL_HOURS = int(os.getenv("AUTH_SESSION_TTL_HOURS", "24"))
+AUTH_CSRF_COOKIE = "bp_csrf_token"
+AUTH_SESSION_TTL_HOURS = int(os.getenv("AUTH_SESSION_TTL_HOURS", "12"))
 AUTH_OTP_TTL_MINUTES = int(os.getenv("AUTH_OTP_TTL_MINUTES", "10"))
 AUTH_OTP_MAX_ATTEMPTS = int(os.getenv("AUTH_OTP_MAX_ATTEMPTS", "6"))
+AUTH_OTP_RESEND_COOLDOWN_SECONDS = int(os.getenv("AUTH_OTP_RESEND_COOLDOWN_SECONDS", "45"))
 AUTH_EMAIL_FROM = os.getenv("AUTH_EMAIL_FROM", "no-reply@bp-pilot.ch")
 AUTH_SMTP_HOST = os.getenv("AUTH_SMTP_HOST", "")
 AUTH_SMTP_PORT = int(os.getenv("AUTH_SMTP_PORT", "587"))
@@ -98,6 +105,9 @@ AUTH_SMTP_USER = os.getenv("AUTH_SMTP_USER", "")
 AUTH_SMTP_PASS = os.getenv("AUTH_SMTP_PASS", "")
 AUTH_SMTP_TLS = os.getenv("AUTH_SMTP_TLS", "true").lower() in ("1", "true", "yes")
 AUTH_CODE_PEPPER = os.getenv("AUTH_CODE_PEPPER", "")
+
+_rate_lock = threading.Lock()
+_rate_hits: Dict[str, List[float]] = {}
 
 
 def _utc_now() -> datetime:
@@ -127,6 +137,55 @@ def _normalize_email(raw: str) -> str:
     return str(raw or "").strip().lower()
 
 
+def _client_ip(request: Request) -> str:
+    xff = str(request.headers.get("x-forwarded-for") or "").strip()
+    if xff:
+        return xff.split(",")[0].strip()
+    return str(request.client.host if request.client else "")
+
+
+def _check_rate_limit(*, bucket: str, limit: int, window_seconds: int) -> None:
+    now = time.time()
+    with _rate_lock:
+        hits = _rate_hits.get(bucket, [])
+        hits = [t for t in hits if (now - t) <= float(window_seconds)]
+        if len(hits) >= int(limit):
+            _rate_hits[bucket] = hits
+            raise HTTPException(status_code=429, detail="Too many requests. Please try again shortly.")
+        hits.append(now)
+        _rate_hits[bucket] = hits
+
+
+def _get_or_set_csrf_token(request: Request, response: Optional[Response] = None) -> str:
+    token = str(request.cookies.get(AUTH_CSRF_COOKIE) or "").strip()
+    if token:
+        return token
+    token = secrets.token_urlsafe(24)
+    if response is not None:
+        response.set_cookie(
+            key=AUTH_CSRF_COOKIE,
+            value=token,
+            httponly=False,
+            samesite="lax",
+            secure=_is_secure_request(request),
+            max_age=60 * 60 * 24,
+            path="/",
+        )
+    return token
+
+
+def _require_csrf(request: Request) -> None:
+    cookie_token = str(request.cookies.get(AUTH_CSRF_COOKIE) or "").strip()
+    header_token = str(request.headers.get("x-csrf-token") or "").strip()
+    if not cookie_token or not header_token or not hmac.compare_digest(cookie_token, header_token):
+        raise HTTPException(status_code=403, detail="CSRF validation failed.")
+
+
+def _challenge_age_seconds(challenge: Dict[str, Any]) -> int:
+    created = _parse_iso(str(challenge.get("created_at") or ""))
+    return max(0, int((_utc_now() - created).total_seconds()))
+
+
 def _validate_email(raw: str) -> str:
     email = _normalize_email(raw)
     if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
@@ -135,25 +194,12 @@ def _validate_email(raw: str) -> str:
 
 
 def _password_hash(password: str) -> str:
-    iterations = 240000
-    salt = secrets.token_hex(16)
-    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), iterations)
-    return f"pbkdf2_sha256${iterations}${salt}${dk.hex()}"
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
 
 
 def _password_verify(password: str, stored: str) -> bool:
     try:
-        algo, iters_raw, salt_hex, digest_hex = str(stored).split("$", 3)
-        if algo != "pbkdf2_sha256":
-            return False
-        iterations = int(iters_raw)
-        dk = hashlib.pbkdf2_hmac(
-            "sha256",
-            password.encode("utf-8"),
-            bytes.fromhex(salt_hex),
-            iterations,
-        )
-        return hmac.compare_digest(dk.hex(), digest_hex)
+        return bool(bcrypt.checkpw(password.encode("utf-8"), str(stored).encode("utf-8")))
     except Exception:
         return False
 
@@ -255,17 +301,67 @@ class VerifyRequest(BaseModel):
     code: str
 
 
+class ResendRequest(BaseModel):
+    challenge_id: str
+
+
+class PasswordResetRequest(BaseModel):
+    email: str
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    challenge_id: str
+    code: str
+    new_password: str
+
+
+def _create_and_send_challenge(*, user_id: str, email: str, purpose: str) -> Dict[str, Any]:
+    latest = get_latest_open_challenge_for_email(db_engine, email=email, purpose=purpose)
+    if latest and not latest.get("used_at") and _parse_iso(str(latest.get("expires_at") or "")) > _utc_now():
+        age = _challenge_age_seconds(latest)
+        if age < AUTH_OTP_RESEND_COOLDOWN_SECONDS:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Please wait {AUTH_OTP_RESEND_COOLDOWN_SECONDS - age}s before requesting a new code.",
+            )
+    code = f"{secrets.randbelow(1000000):06d}"
+    challenge = create_email_challenge(
+        db_engine,
+        user_id=user_id,
+        email=email,
+        purpose=purpose,
+        code_hash=_code_hash(code),
+        expires_at=_iso(_utc_now() + timedelta(minutes=AUTH_OTP_TTL_MINUTES)),
+    )
+    _send_email_code(email=email, code=code, purpose=purpose)
+    return challenge
+
+
+@app.get("/auth/csrf")
+def auth_csrf(request: Request, response: Response) -> Dict[str, Any]:
+    token = _get_or_set_csrf_token(request, response)
+    return {"csrf_token": token}
+
+
 @app.post("/auth/register")
-def auth_register(payload: RegisterRequest) -> Dict[str, Any]:
+def auth_register(payload: RegisterRequest, request: Request) -> Dict[str, Any]:
+    _require_csrf(request)
     email = _validate_email(payload.email)
+    ip = _client_ip(request)
+    _check_rate_limit(bucket=f"reg:ip:{ip}", limit=12, window_seconds=900)
+    _check_rate_limit(bucket=f"reg:email:{email}", limit=8, window_seconds=900)
+
     password = str(payload.password or "")
     if len(password) < 10:
+        insert_auth_audit(db_engine, event="register", email=email, ip=ip, success=False, detail="weak_password")
         raise HTTPException(status_code=400, detail="Password must be at least 10 characters.")
     if not payload.accept_terms:
+        insert_auth_audit(db_engine, event="register", email=email, ip=ip, success=False, detail="terms_missing")
         raise HTTPException(status_code=400, detail="You must accept terms and agreements.")
 
     existing = get_user_by_email(db_engine, email=email)
     if existing:
+        insert_auth_audit(db_engine, event="register", email=email, ip=ip, success=False, detail="email_exists")
         raise HTTPException(status_code=409, detail="Email already registered.")
 
     user = create_user(
@@ -274,16 +370,8 @@ def auth_register(payload: RegisterRequest) -> Dict[str, Any]:
         password_hash=_password_hash(password),
         terms_accepted=True,
     )
-    code = f"{secrets.randbelow(1000000):06d}"
-    challenge = create_email_challenge(
-        db_engine,
-        user_id=str(user["user_id"]),
-        email=email,
-        purpose="register",
-        code_hash=_code_hash(code),
-        expires_at=_iso(_utc_now() + timedelta(minutes=AUTH_OTP_TTL_MINUTES)),
-    )
-    _send_email_code(email=email, code=code, purpose="register")
+    challenge = _create_and_send_challenge(user_id=str(user["user_id"]), email=email, purpose="register")
+    insert_auth_audit(db_engine, event="register", email=email, ip=ip, success=True)
     return {
         "challenge_id": challenge["challenge_id"],
         "expires_in_seconds": AUTH_OTP_TTL_MINUTES * 60,
@@ -292,23 +380,21 @@ def auth_register(payload: RegisterRequest) -> Dict[str, Any]:
 
 
 @app.post("/auth/login")
-def auth_login(payload: LoginRequest) -> Dict[str, Any]:
+def auth_login(payload: LoginRequest, request: Request) -> Dict[str, Any]:
+    _require_csrf(request)
     email = _validate_email(payload.email)
+    ip = _client_ip(request)
+    _check_rate_limit(bucket=f"login:ip:{ip}", limit=20, window_seconds=900)
+    _check_rate_limit(bucket=f"login:email:{email}", limit=10, window_seconds=900)
+
     password = str(payload.password or "")
     user = get_user_by_email(db_engine, email=email)
     if not user or not _password_verify(password, str(user.get("password_hash") or "")):
+        insert_auth_audit(db_engine, event="login_password", email=email, ip=ip, success=False, detail="invalid_credentials")
         raise HTTPException(status_code=401, detail="Invalid email or password.")
 
-    code = f"{secrets.randbelow(1000000):06d}"
-    challenge = create_email_challenge(
-        db_engine,
-        user_id=str(user["user_id"]),
-        email=email,
-        purpose="login",
-        code_hash=_code_hash(code),
-        expires_at=_iso(_utc_now() + timedelta(minutes=AUTH_OTP_TTL_MINUTES)),
-    )
-    _send_email_code(email=email, code=code, purpose="login")
+    challenge = _create_and_send_challenge(user_id=str(user["user_id"]), email=email, purpose="login")
+    insert_auth_audit(db_engine, event="login_password", email=email, ip=ip, success=True)
     return {
         "challenge_id": challenge["challenge_id"],
         "expires_in_seconds": AUTH_OTP_TTL_MINUTES * 60,
@@ -316,33 +402,71 @@ def auth_login(payload: LoginRequest) -> Dict[str, Any]:
     }
 
 
+@app.post("/auth/resend")
+def auth_resend(payload: ResendRequest, request: Request) -> Dict[str, Any]:
+    _require_csrf(request)
+    ip = _client_ip(request)
+    _check_rate_limit(bucket=f"resend:ip:{ip}", limit=20, window_seconds=900)
+    challenge_id = str(payload.challenge_id or "").strip()
+    challenge = get_email_challenge(db_engine, challenge_id=challenge_id)
+    if not challenge:
+        raise HTTPException(status_code=404, detail="Verification challenge not found.")
+    if challenge.get("used_at"):
+        raise HTTPException(status_code=400, detail="Verification challenge already used.")
+    if _parse_iso(str(challenge.get("expires_at") or "")) <= _utc_now():
+        raise HTTPException(status_code=400, detail="Verification code expired.")
+    email = _normalize_email(str(challenge.get("email") or ""))
+    purpose = str(challenge.get("purpose") or "")
+    if purpose not in ("register", "login", "reset"):
+        raise HTTPException(status_code=400, detail="Challenge cannot be resent.")
+    fresh = _create_and_send_challenge(user_id=str(challenge.get("user_id") or ""), email=email, purpose=purpose)
+    insert_auth_audit(db_engine, event="otp_resend", email=email, ip=ip, success=True, detail=purpose)
+    return {
+        "challenge_id": fresh["challenge_id"],
+        "expires_in_seconds": AUTH_OTP_TTL_MINUTES * 60,
+        "purpose": purpose,
+    }
+
+
 @app.post("/auth/verify")
 def auth_verify(payload: VerifyRequest, request: Request, response: Response) -> Dict[str, Any]:
+    _require_csrf(request)
     challenge_id = str(payload.challenge_id or "").strip()
     code = str(payload.code or "").strip()
+    ip = _client_ip(request)
+    _check_rate_limit(bucket=f"verify:ip:{ip}", limit=30, window_seconds=900)
     if not challenge_id or not re.fullmatch(r"\d{6}", code):
         raise HTTPException(status_code=400, detail="Invalid verification payload.")
 
     challenge = get_email_challenge(db_engine, challenge_id=challenge_id)
     if not challenge:
         raise HTTPException(status_code=404, detail="Verification challenge not found.")
+    email = _normalize_email(str(challenge.get("email") or ""))
+    _check_rate_limit(bucket=f"verify:email:{email}", limit=20, window_seconds=900)
+
     if challenge.get("used_at"):
         raise HTTPException(status_code=400, detail="Verification challenge already used.")
     if int(challenge.get("attempts") or 0) >= AUTH_OTP_MAX_ATTEMPTS:
+        insert_auth_audit(db_engine, event="otp_verify", email=email, ip=ip, success=False, detail="attempts_exceeded")
         raise HTTPException(status_code=429, detail="Too many verification attempts.")
     if _parse_iso(str(challenge.get("expires_at") or "")) <= _utc_now():
+        insert_auth_audit(db_engine, event="otp_verify", email=email, ip=ip, success=False, detail="expired")
         raise HTTPException(status_code=400, detail="Verification code expired.")
 
     if not hmac.compare_digest(str(challenge.get("code_hash") or ""), _code_hash(code)):
         increment_challenge_attempts(db_engine, challenge_id=challenge_id)
+        insert_auth_audit(db_engine, event="otp_verify", email=email, ip=ip, success=False, detail="invalid_code")
         raise HTTPException(status_code=401, detail="Invalid verification code.")
 
     mark_challenge_used(db_engine, challenge_id=challenge_id)
     user_id = str(challenge.get("user_id") or "")
-    email = _normalize_email(str(challenge.get("email") or ""))
     purpose = str(challenge.get("purpose") or "")
     if purpose == "register":
         set_user_verified(db_engine, user_id=user_id)
+
+    old_sid = request.cookies.get(AUTH_SESSION_COOKIE, "")
+    if old_sid:
+        delete_auth_session(db_engine, session_id=old_sid)
 
     sess = create_auth_session(
         db_engine,
@@ -351,11 +475,71 @@ def auth_verify(payload: VerifyRequest, request: Request, response: Response) ->
         expires_at=_iso(_utc_now() + timedelta(hours=AUTH_SESSION_TTL_HOURS)),
     )
     _set_auth_cookie(response, request, str(sess["session_id"]))
+    insert_auth_audit(db_engine, event="otp_verify", email=email, ip=ip, success=True, detail=purpose)
     return {"authenticated": True, "email": email}
 
 
+@app.post("/auth/password-reset/request")
+def auth_password_reset_request(payload: PasswordResetRequest, request: Request) -> Dict[str, Any]:
+    _require_csrf(request)
+    email = _validate_email(payload.email)
+    ip = _client_ip(request)
+    _check_rate_limit(bucket=f"reset_req:ip:{ip}", limit=12, window_seconds=900)
+    _check_rate_limit(bucket=f"reset_req:email:{email}", limit=6, window_seconds=900)
+
+    challenge_id = ""
+    user = get_user_by_email(db_engine, email=email)
+    if user:
+        challenge = _create_and_send_challenge(user_id=str(user["user_id"]), email=email, purpose="reset")
+        challenge_id = str(challenge.get("challenge_id") or "")
+    insert_auth_audit(db_engine, event="password_reset_request", email=email, ip=ip, success=True)
+    # Keep response generic to avoid user enumeration.
+    return {"ok": True, "challenge_id": challenge_id}
+
+
+@app.post("/auth/password-reset/confirm")
+def auth_password_reset_confirm(payload: PasswordResetConfirmRequest, request: Request) -> Dict[str, Any]:
+    _require_csrf(request)
+    challenge_id = str(payload.challenge_id or "").strip()
+    code = str(payload.code or "").strip()
+    new_password = str(payload.new_password or "")
+    ip = _client_ip(request)
+    _check_rate_limit(bucket=f"reset_confirm:ip:{ip}", limit=20, window_seconds=900)
+    if len(new_password) < 10:
+        raise HTTPException(status_code=400, detail="Password must be at least 10 characters.")
+    if not challenge_id or not re.fullmatch(r"\d{6}", code):
+        raise HTTPException(status_code=400, detail="Invalid verification payload.")
+
+    challenge = get_email_challenge(db_engine, challenge_id=challenge_id)
+    if not challenge:
+        raise HTTPException(status_code=404, detail="Verification challenge not found.")
+    email = _normalize_email(str(challenge.get("email") or ""))
+    if str(challenge.get("purpose") or "") != "reset":
+        raise HTTPException(status_code=400, detail="Invalid reset challenge.")
+    if challenge.get("used_at"):
+        raise HTTPException(status_code=400, detail="Verification challenge already used.")
+    if int(challenge.get("attempts") or 0) >= AUTH_OTP_MAX_ATTEMPTS:
+        raise HTTPException(status_code=429, detail="Too many verification attempts.")
+    if _parse_iso(str(challenge.get("expires_at") or "")) <= _utc_now():
+        raise HTTPException(status_code=400, detail="Verification code expired.")
+    if not hmac.compare_digest(str(challenge.get("code_hash") or ""), _code_hash(code)):
+        increment_challenge_attempts(db_engine, challenge_id=challenge_id)
+        insert_auth_audit(db_engine, event="password_reset_confirm", email=email, ip=ip, success=False, detail="invalid_code")
+        raise HTTPException(status_code=401, detail="Invalid verification code.")
+
+    mark_challenge_used(db_engine, challenge_id=challenge_id)
+    update_user_password(
+        db_engine,
+        user_id=str(challenge.get("user_id") or ""),
+        password_hash=_password_hash(new_password),
+    )
+    insert_auth_audit(db_engine, event="password_reset_confirm", email=email, ip=ip, success=True)
+    return {"ok": True}
+
+
 @app.get("/auth/session")
-def auth_session(request: Request) -> Dict[str, Any]:
+def auth_session(request: Request, response: Response) -> Dict[str, Any]:
+    _get_or_set_csrf_token(request, response)
     try:
         sess = _get_auth_session_or_401(request)
     except HTTPException:
@@ -368,9 +552,18 @@ def auth_session(request: Request) -> Dict[str, Any]:
 
 @app.post("/auth/logout")
 def auth_logout(request: Request, response: Response) -> Dict[str, Any]:
+    _require_csrf(request)
     sid = request.cookies.get(AUTH_SESSION_COOKIE, "")
     if sid:
+        sess = get_auth_session(db_engine, session_id=sid)
         delete_auth_session(db_engine, session_id=sid)
+        insert_auth_audit(
+            db_engine,
+            event="logout",
+            email=str((sess or {}).get("email") or ""),
+            ip=_client_ip(request),
+            success=True,
+        )
     _clear_auth_cookie(response, request)
     return {"ok": True}
 
