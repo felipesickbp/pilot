@@ -551,7 +551,6 @@ export default function PreviewPage() {
                     <th className="p-3 text-left">Buchungstext</th>
                     <th className="p-3 text-left">Betrag</th>
                     <th className="p-3 text-left">Währung</th>
-                    <th className="p-3 text-left">Richtung</th>
                     <th className="p-3 text-left">Betragsquelle</th>
                   </tr>
                 </thead>
@@ -565,35 +564,17 @@ export default function PreviewPage() {
                       </td>
                       <td className="p-3">{r.currency || "CHF"}</td>
                       <td className="p-3">
-                        {r.direction === "CRDT" ? (
-                          <Badge variant="blue">CRDT</Badge>
+                        {r.direction === "DBIT" ? (
+                          <Badge variant="pink">Belastung</Badge>
                         ) : (
-                          <Badge variant="pink">DBIT</Badge>
+                          <Badge variant="blue">Gutschrift</Badge>
                         )}
-                      </td>
-                      <td className="p-3 text-xs">
-                        <div className="flex flex-wrap gap-1">
-                          {r.amountDiagnostics?.ambiguousBothSides ? (
-                            <Badge variant="pink">Belastung+Gutschrift</Badge>
-                          ) : null}
-                          {r.amountDiagnostics?.usedDebit ? <Badge variant="blue">Belastung</Badge> : null}
-                          {r.amountDiagnostics?.usedCredit ? <Badge variant="blue">Gutschrift</Badge> : null}
-                          {r.amountDiagnostics?.usedFallback ? <Badge variant="blue">Fallback</Badge> : null}
-                          {r.amountDiagnostics?.summaryInheritedSign ? (
-                            <Badge variant="pink">Sammel-Vorzeichen</Badge>
-                          ) : null}
-                          {!r.amountDiagnostics?.usedDebit &&
-                          !r.amountDiagnostics?.usedCredit &&
-                          !r.amountDiagnostics?.usedFallback ? (
-                            <span className="text-slate-400">Direkt/Einzelspalte</span>
-                          ) : null}
-                        </div>
                       </td>
                     </tr>
                   ))}
                   {!normalizedRows.length ? (
                     <tr>
-                      <td colSpan={6} className="p-6 text-center text-slate-500">
+                      <td colSpan={5} className="p-6 text-center text-slate-500">
                         Noch keine Zeilen. Bitte links das Mapping anpassen.
                       </td>
                     </tr>

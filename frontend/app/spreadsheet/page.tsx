@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { AppShell } from "../components/shell";
 import { FlowStepper } from "../components/stepper";
 import { Badge, Button, Card, CardContent, CardHeader, Subhead } from "../components/ui";
-import { Send, Trash2, Wand2 } from "lucide-react";
+import { Send, Sparkles, Trash2, Wand2, X } from "lucide-react";
 import { type NormalizedRow, safeText } from "../importer";
 
 type Row = NormalizedRow;
@@ -79,6 +79,11 @@ export default function SpreadsheetPage() {
   const [autoRulesDone, setAutoRulesDone] = useState(false);
   const [activeCell, setActiveCell] = useState<string>("");
   const [vatEnabled, setVatEnabled] = useState(true);
+  const [ruleModalRowId, setRuleModalRowId] = useState("");
+  const [ruleKeyword, setRuleKeyword] = useState("");
+  const [ruleAccountInput, setRuleAccountInput] = useState("");
+  const [ruleSide, setRuleSide] = useState<"auto" | "soll" | "haben">("auto");
+  const [ruleSaving, setRuleSaving] = useState(false);
 
   useEffect(() => {
     const stored = safeParse<any[]>(sessionStorage.getItem(STORAGE_KEY));
@@ -259,6 +264,59 @@ export default function SpreadsheetPage() {
     return accounts
       .filter((a) => a.number.toLowerCase().includes(q) || safeText(a.name).toLowerCase().includes(q))
       .slice(0, 6);
+  }
+
+  function openRuleModal(row: Row) {
+    const description = safeText(row.description);
+    const accountPref = row.direction === "DBIT" ? row.sollAccount || row.habenAccount : row.habenAccount || row.sollAccount;
+    setRuleModalRowId(row.id);
+    setRuleKeyword(description);
+    setRuleAccountInput(accountPref || "");
+    setRuleSide("auto");
+  }
+
+  function closeRuleModal() {
+    setRuleModalRowId("");
+    setRuleKeyword("");
+    setRuleAccountInput("");
+    setRuleSide("auto");
+    setRuleSaving(false);
+  }
+
+  async function saveRuleFromModal() {
+    if (!ruleModalRowId) return;
+    const keyword = safeText(ruleKeyword);
+    const accountNo = normalizeAccountNo(ruleAccountInput);
+    if (!keyword) {
+      setToast("Bitte Stichwort für die Buchungsregel erfassen.");
+      return;
+    }
+    if (!accountNo) {
+      setToast("Bitte Konto für die Buchungsregel erfassen.");
+      return;
+    }
+
+    try {
+      setRuleSaving(true);
+      const res = await fetch(`${apiBase}/posting-rules`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          keyword,
+          account_no: accountNo,
+          side: ruleSide,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.detail || "Regel konnte nicht gespeichert werden.");
+      setRules((prev) => [data as PostingRule, ...prev]);
+      setToast("Buchungsregel gespeichert ✨");
+      closeRuleModal();
+    } catch (e: any) {
+      setToast(e?.message || "Regel konnte nicht gespeichert werden.");
+      setRuleSaving(false);
+    }
   }
 
   function accountCell(row: Row, field: "sollAccount" | "habenAccount") {
@@ -482,9 +540,6 @@ export default function SpreadsheetPage() {
                         <td className="p-3">
                           <div className="rounded-lg border border-[color:var(--bp-border)] bg-white px-2 py-1">
                             {Math.abs(Number(r.amount)).toFixed(2)}
-                            <div className="mt-1">
-                              <Badge variant={r.direction === "DBIT" ? "pink" : "blue"}>{r.direction || "—"}</Badge>
-                            </div>
                           </div>
                         </td>
 
@@ -505,15 +560,31 @@ export default function SpreadsheetPage() {
                           </td>
                         ) : null}
                         <td className="p-3">
-                          <Button
-                            variant="outline"
-                            onClick={() => deleteRow(r.id)}
-                            title="Zeile löschen"
-                            aria-label="Zeile löschen"
-                            className="h-9 px-3"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          <div className="flex items-center gap-1">
+                            {rules.some((rule) => ruleMatches(rule, r)) ? (
+                              <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-sky-200 bg-sky-50 text-sky-700" title="Buchungsregel vorhanden">
+                                <Sparkles className="h-3.5 w-3.5" />
+                              </span>
+                            ) : null}
+                            <Button
+                              variant="outline"
+                              onClick={() => openRuleModal(r)}
+                              title="Buchungsregel hinzufügen"
+                              aria-label="Buchungsregel hinzufügen"
+                              className="h-7 px-2"
+                            >
+                              <Sparkles className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              onClick={() => deleteRow(r.id)}
+                              title="Zeile löschen"
+                              aria-label="Zeile löschen"
+                              className="h-7 px-2"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -556,6 +627,80 @@ export default function SpreadsheetPage() {
           </CardContent>
         </Card>
       </div>
+
+      {ruleModalRowId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <Card className="w-full max-w-lg">
+            <CardHeader>
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-semibold">Buchungsregel hinzufügen</div>
+                  <Subhead>Regel wird direkt für den aktuellen Mandanten gespeichert.</Subhead>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeRuleModal}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[color:var(--bp-border)] bg-white text-slate-600 hover:bg-slate-50"
+                  aria-label="Schließen"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-slate-600">Text enthält</label>
+                <input
+                  className="mt-1 h-10 w-full rounded-xl border border-[color:var(--bp-border)] bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-fuchsia-200"
+                  value={ruleKeyword}
+                  onChange={(e) => setRuleKeyword(e.target.value)}
+                  placeholder="z. B. Media Markt"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-slate-600">Konto</label>
+                <input
+                  className="mt-1 h-10 w-full rounded-xl border border-[color:var(--bp-border)] bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-fuchsia-200"
+                  value={ruleAccountInput}
+                  onChange={(e) => setRuleAccountInput(e.target.value)}
+                  placeholder="z. B. 6800 oder Verpflegungsspesen"
+                  list="rule-account-options-inline"
+                />
+                <datalist id="rule-account-options-inline">
+                  {accounts.map((a) => (
+                    <option key={`rule-inline-${a.id}-${a.number}`} value={`${a.number} ${a.name}`}>
+                      {a.display}
+                    </option>
+                  ))}
+                </datalist>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-slate-600">Zielseite</label>
+                <select
+                  className="mt-1 h-10 w-full rounded-xl border border-[color:var(--bp-border)] bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-fuchsia-200"
+                  value={ruleSide}
+                  onChange={(e) => setRuleSide(e.target.value as "auto" | "soll" | "haben")}
+                >
+                  <option value="auto">Auto</option>
+                  <option value="soll">Immer Soll</option>
+                  <option value="haben">Immer Haben</option>
+                </select>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-1">
+                <Button variant="outline" onClick={closeRuleModal}>
+                  Abbrechen
+                </Button>
+                <Button onClick={saveRuleFromModal} disabled={ruleSaving}>
+                  {ruleSaving ? "Speichere..." : "Regel speichern"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
     </AppShell>
   );
 }
