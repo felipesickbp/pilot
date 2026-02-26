@@ -1,6 +1,32 @@
 import os
-from fastapi import FastAPI
+import io
+import csv
+import time
+import uuid
+import secrets
+import random
+import re
+from datetime import date as dt_date
+from urllib.parse import urlencode
+from typing import Any, Dict, List, Tuple, Optional
+
+import chardet
+import pandas as pd
+import requests
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Response, Query
+from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+
+from app.db import get_engine
+from app.services.history_store import (
+    delete_import_history,
+    get_import_history_item,
+    get_import_history_csv,
+    init_history_schema,
+    insert_import_history,
+    list_import_history,
+)
 
 app = FastAPI()
 
@@ -13,11 +39,1022 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+db_engine = get_engine()
+
+
+@app.on_event("startup")
+def _startup() -> None:
+    init_history_schema(db_engine)
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
+
 @app.get("/clients")
 def clients():
-    # placeholder: later fetch from DB / bexio connection table
     return [{"id": "demo", "name": "Demo Mandant"}]
+
+
+# ------------------------------------------------------------
+# Bexio OAuth session support
+# ------------------------------------------------------------
+
+BEXIO_AUTHORIZE_URL = os.getenv("BEXIO_AUTHORIZE_URL") or os.getenv(
+    "AUTH_URL", "https://auth.bexio.com/realms/bexio/protocol/openid-connect/auth"
+)
+BEXIO_TOKEN_URL = os.getenv("BEXIO_TOKEN_URL") or os.getenv(
+    "TOKEN_URL", "https://auth.bexio.com/realms/bexio/protocol/openid-connect/token"
+)
+BEXIO_API_V2 = os.getenv("BEXIO_API_V2", "https://api.bexio.com/2.0")
+BEXIO_API_V3 = os.getenv("BEXIO_API_V3", "https://api.bexio.com/3.0")
+BEXIO_CLIENT_ID = os.getenv("BEXIO_CLIENT_ID", "")
+BEXIO_CLIENT_SECRET = os.getenv("BEXIO_CLIENT_SECRET", "")
+BEXIO_SCOPES = os.getenv("BEXIO_SCOPES", "openid profile email offline_access company_profile")
+BEXIO_REDIRECT_URI = os.getenv("BEXIO_REDIRECT_URI", "")
+BEXIO_SESSION_COOKIE = "bp_bexio_sid"
+
+# In-memory per-session auth state (sufficient for single-instance MVP).
+_bexio_sessions: Dict[str, Dict[str, Any]] = {}
+
+
+def _build_base_url(request: Request) -> str:
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    return f"{proto}://{host}"
+
+
+def _get_or_create_sid(request: Request, response: Response) -> str:
+    sid = request.cookies.get(BEXIO_SESSION_COOKIE)
+    if sid:
+        return sid
+
+    sid = str(uuid.uuid4())
+    response.set_cookie(
+        key=BEXIO_SESSION_COOKIE,
+        value=sid,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        max_age=60 * 60 * 24 * 30,
+        path="/",
+    )
+    return sid
+
+
+def _extract_client_name_from_payload(payload: Any) -> str:
+    if isinstance(payload, dict):
+        for key in ("name", "company_name", "company", "title", "organisation_name", "organization_name"):
+            v = payload.get(key)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+        nested = payload.get("data")
+        if nested is not None:
+            nested_name = _extract_client_name_from_payload(nested)
+            if nested_name:
+                return nested_name
+
+    if isinstance(payload, list):
+        for item in payload:
+            nested_name = _extract_client_name_from_payload(item)
+            if nested_name:
+                return nested_name
+
+    return ""
+
+
+def _extract_client_id_from_payload(payload: Any) -> str:
+    if isinstance(payload, dict):
+        for key in ("id", "tenant_id", "company_id", "uuid", "uid"):
+            v = payload.get(key)
+            if v is not None and str(v).strip():
+                return str(v).strip()
+        nested = payload.get("data")
+        if nested is not None:
+            nested_id = _extract_client_id_from_payload(nested)
+            if nested_id:
+                return nested_id
+
+    if isinstance(payload, list):
+        for item in payload:
+            nested_id = _extract_client_id_from_payload(item)
+            if nested_id:
+                return nested_id
+
+    return ""
+
+
+def _auth_headers(token: str) -> Dict[str, str]:
+    return {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+
+
+def _auth(token: str) -> Dict[str, str]:
+    return {
+        **_auth_headers(token),
+        "Accept": "application/json",
+    }
+
+
+def _auth_v2(token: str) -> Dict[str, str]:
+    return {
+        **_auth_headers(token),
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+
+
+def _refresh_access_token(sid: str, sess: Dict[str, Any]) -> Optional[str]:
+    refresh_token = str(sess.get("refresh_token") or "")
+    if not refresh_token:
+        return None
+
+    payload = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id": BEXIO_CLIENT_ID,
+        "client_secret": BEXIO_CLIENT_SECRET,
+    }
+    try:
+        resp = requests.post(BEXIO_TOKEN_URL, data=payload, timeout=15)
+        if resp.status_code >= 400:
+            return None
+        data = resp.json()
+    except Exception:
+        return None
+
+    access_token = data.get("access_token")
+    if not access_token:
+        return None
+
+    sess["access_token"] = access_token
+    sess["refresh_token"] = data.get("refresh_token") or refresh_token
+    sess["expires_at"] = int(time.time()) + int(data.get("expires_in") or 0)
+    _bexio_sessions[sid] = sess
+    return access_token
+
+
+def _fetch_company_profile(sid: str, sess: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    access_token = str(sess.get("access_token") or "")
+    if not access_token:
+        return None
+
+    # 1) Try v2 company_profile with streamlit-equivalent headers.
+    try:
+        r = requests.get(f"{BEXIO_API_V2}/company_profile", headers=_auth_v2(access_token), timeout=20)
+        if r.status_code == 401:
+            refreshed = _refresh_access_token(sid, sess)
+            if refreshed:
+                access_token = refreshed
+                r = requests.get(f"{BEXIO_API_V2}/company_profile", headers=_auth_v2(access_token), timeout=20)
+        if r.status_code < 400:
+            payload = r.json()
+            return payload if isinstance(payload, dict) else None
+    except Exception:
+        pass
+
+    # 2) Fallback v3 company_profile.
+    try:
+        r = requests.get(f"{BEXIO_API_V3}/company_profile", headers=_auth(access_token), timeout=20)
+        if r.status_code == 401:
+            refreshed = _refresh_access_token(sid, sess)
+            if refreshed:
+                access_token = refreshed
+                r = requests.get(f"{BEXIO_API_V3}/company_profile", headers=_auth(access_token), timeout=20)
+        if r.status_code < 400:
+            payload = r.json()
+            return payload if isinstance(payload, dict) else None
+    except Exception:
+        pass
+
+    return None
+
+
+def _fetch_bexio_client_name(sid: str, sess: Dict[str, Any]) -> str:
+    profile = _fetch_company_profile(sid, sess)
+    if profile:
+        name = _extract_client_name_from_payload(profile)
+        if name:
+            return name
+
+    return ""
+
+
+def _ensure_tenant_context(sid: str, sess: Dict[str, Any]) -> Tuple[str, str]:
+    tenant_id = str(sess.get("tenant_id") or "").strip()
+    tenant_name = str(sess.get("client_name") or "").strip()
+
+    if tenant_id and tenant_name:
+        return tenant_id, tenant_name
+
+    profile = _fetch_company_profile(sid, sess)
+    if profile:
+        profile_tenant_id = _extract_client_id_from_payload(profile)
+        profile_tenant_name = _extract_client_name_from_payload(profile)
+        if profile_tenant_id:
+            tenant_id = f"bexio:{profile_tenant_id}"
+        if profile_tenant_name:
+            tenant_name = profile_tenant_name
+
+    if not tenant_id:
+        tenant_id = f"session:{sid}"
+    if not tenant_name:
+        tenant_name = "Connected bexio client"
+
+    sess["tenant_id"] = tenant_id
+    sess["client_name"] = tenant_name
+    _bexio_sessions[sid] = sess
+    return tenant_id, tenant_name
+
+
+@app.get("/bexio/session")
+def bexio_session(request: Request):
+    sid = request.cookies.get(BEXIO_SESSION_COOKIE)
+    sess = _bexio_sessions.get(sid or "", {})
+    connected = bool(sess.get("access_token"))
+    client_name = str(sess.get("client_name") or "").strip()
+    tenant_id = str(sess.get("tenant_id") or "").strip()
+    if connected and sid and (not client_name or not tenant_id):
+        tenant_id, client_name = _ensure_tenant_context(sid, sess)
+    return {
+        "connected": connected,
+        "client_name": client_name if connected else "",
+        "tenant_id": tenant_id if connected else "",
+    }
+
+
+@app.get("/bexio/connect")
+def bexio_connect(
+    request: Request,
+    response: Response,
+    reconnect: bool = Query(default=False),
+):
+    if not BEXIO_CLIENT_ID or not BEXIO_CLIENT_SECRET:
+        raise HTTPException(status_code=500, detail="Missing BEXIO_CLIENT_ID / BEXIO_CLIENT_SECRET")
+
+    sid = _get_or_create_sid(request, response)
+    sess = _bexio_sessions.get(sid, {})
+    if reconnect:
+        sess = {}
+    state = secrets.token_urlsafe(24)
+    sess["oauth_state"] = state
+    _bexio_sessions[sid] = sess
+
+    redirect_uri = BEXIO_REDIRECT_URI or f"{_build_base_url(request)}/api/bexio/callback"
+    params = {
+        "response_type": "code",
+        "client_id": BEXIO_CLIENT_ID,
+        "redirect_uri": redirect_uri,
+        "scope": BEXIO_SCOPES,
+        "state": state,
+    }
+    auth_url = f"{BEXIO_AUTHORIZE_URL}?{urlencode(params)}"
+    return {"auth_url": auth_url}
+
+
+@app.get("/bexio/callback")
+@app.get("/bexio/callback/")
+def bexio_callback(
+    request: Request,
+    code: str = Query(default=""),
+    state: str = Query(default=""),
+):
+    sid = request.cookies.get(BEXIO_SESSION_COOKIE, "")
+    sess = _bexio_sessions.get(sid, {})
+    expected_state = str(sess.get("oauth_state") or "")
+
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing OAuth code")
+    if not state or state != expected_state:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+
+    redirect_uri = BEXIO_REDIRECT_URI or f"{_build_base_url(request)}/api/bexio/callback"
+    payload = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "client_id": BEXIO_CLIENT_ID,
+        "client_secret": BEXIO_CLIENT_SECRET,
+    }
+    token_resp = requests.post(BEXIO_TOKEN_URL, data=payload, timeout=15)
+    if token_resp.status_code >= 400:
+        raise HTTPException(status_code=400, detail=f"Token exchange failed: {token_resp.text}")
+
+    token_data = token_resp.json()
+    access_token = token_data.get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=400, detail="Token exchange did not return access_token")
+
+    new_sess = {
+        "oauth_state": "",
+        "access_token": access_token,
+        "refresh_token": token_data.get("refresh_token"),
+        "expires_at": int(time.time()) + int(token_data.get("expires_in") or 0),
+        "client_name": "",
+    }
+    _bexio_sessions[sid] = new_sess
+    _ensure_tenant_context(sid, new_sess)
+
+    app_redirect = os.getenv("BEXIO_APP_REDIRECT_AFTER_LOGIN", "/upload")
+    if app_redirect.startswith("/"):
+        app_redirect = f"{_build_base_url(request)}{app_redirect}"
+    return RedirectResponse(url=app_redirect, status_code=302)
+
+
+def _normalize_header(s: str) -> str:
+    return (
+        str(s or "")
+        .strip()
+        .lower()
+        .replace(" ", "_")
+        .replace(".", "")
+        .replace("/", "_")
+        .replace("-", "_")
+        .replace("(", "")
+        .replace(")", "")
+    )
+
+
+def _clean_df(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    df = df.dropna(how="all")
+    df = df.fillna("")
+    return df
+
+
+def _score_candidate(df: pd.DataFrame, header_row: int, headers_normalized: List[str]) -> float:
+    score = 0.0
+
+    # Prefer wider tables
+    score += min(len(headers_normalized), 12) * 0.05
+
+    # Prefer non-empty headers
+    non_empty = sum(1 for h in headers_normalized if h and not h.startswith("unnamed:"))
+    score += min(non_empty, 12) * 0.04
+
+    # Prefer realistic transaction-table keywords
+    joined = " ".join(headers_normalized)
+    keywords = [
+        "datum",
+        "date",
+        "valuta",
+        "avisierungstext",
+        "beschreibung",
+        "text",
+        "saldo",
+        "balance",
+        "gutschrift",
+        "lastschrift",
+        "debit",
+        "credit",
+        "betrag",
+        "amount",
+    ]
+    hits = sum(1 for k in keywords if k in joined)
+    score += min(hits, 8) * 0.08
+
+    # Prefer some data rows
+    score += min(len(df), 20) * 0.01
+
+    # Slight preference for headers not too deep in file
+    if header_row <= 10:
+        score += 0.05
+
+    return round(min(score, 0.99), 2)
+
+
+def _build_candidate(
+    df: pd.DataFrame,
+    encoding: str,
+    delimiter: str,
+    header_row: int,
+    reason: str,
+) -> Dict[str, Any]:
+    df = _clean_df(df)
+    headers_normalized = [_normalize_header(c) for c in df.columns]
+    header_signature = "|".join(headers_normalized)
+
+    return {
+        "id": f"h{header_row}_{ord(delimiter[0])}",
+        "encoding": encoding,
+        "delimiter": delimiter,
+        "header_row": int(header_row),
+        "data_start_row": int(header_row + 1),
+        "headers_normalized": headers_normalized,
+        "header_signature": header_signature,
+        "preview_rows": df.head(12).to_dict(orient="records"),
+        "reason": reason,
+        "confidence": _score_candidate(df, header_row, headers_normalized),
+    }
+
+
+def _detect_encoding(raw: bytes) -> str:
+    guess = chardet.detect(raw[:200000])
+    enc = guess.get("encoding") or "utf-8"
+    # prefer utf-8-sig for BOM files
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return "utf-8-sig"
+    return enc
+
+
+def _candidate_header_rows(lines: List[str], delimiter: str) -> List[int]:
+    rows: List[int] = []
+    for i, line in enumerate(lines[:20]):
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        # obvious metadata rows should still be considered lower-quality options
+        if stripped.count(delimiter) >= 1:
+            rows.append(i)
+
+        # if a line looks like a real table header, prioritize it
+        low = stripped.lower()
+        if stripped.count(delimiter) >= 3:
+            rows.append(i)
+        if low.startswith("datum" + delimiter):
+            rows.append(i)
+        if "avisierungstext" in low:
+            rows.append(i)
+
+    # preserve order, unique
+    seen = set()
+    out = []
+    for r in rows:
+        if r not in seen:
+            seen.add(r)
+            out.append(r)
+    return out[:8]
+
+
+def _parse_csv_candidate(
+    text: str,
+    encoding: str,
+    delimiter: str,
+    header_row: int,
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    try:
+        df = pd.read_csv(
+            io.StringIO(text),
+            sep=delimiter,
+            header=header_row,
+            dtype=str,
+            engine="python",
+            skip_blank_lines=True,
+            on_bad_lines="skip",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to read CSV: {e}")
+
+    df = _clean_df(df)
+
+    if df.empty:
+        raise HTTPException(status_code=400, detail="Parsed CSV is empty")
+
+    reason = "Detected transaction table"
+    return df, _build_candidate(df, encoding, delimiter, header_row, reason)
+
+
+def _analyze_csv_candidates(raw: bytes) -> List[Dict[str, Any]]:
+    encoding = _detect_encoding(raw)
+    text = raw.decode(encoding, errors="replace").lstrip("\ufeff")
+    lines = text.splitlines()
+
+    # detect delimiter, but keep fallbacks
+    delimiters: List[str] = []
+    sample = "\n".join([ln for ln in lines[:12] if ln.strip()])
+
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=";,|\t,")
+        delimiters.append(dialect.delimiter)
+    except Exception:
+        pass
+
+    for d in [";", ",", "\t", "|"]:
+        if d not in delimiters:
+            delimiters.append(d)
+
+    candidates: List[Dict[str, Any]] = []
+    seen_keys = set()
+
+    for delimiter in delimiters:
+        header_rows = _candidate_header_rows(lines, delimiter)
+        for header_row in header_rows:
+            try:
+                df, candidate = _parse_csv_candidate(text, encoding, delimiter, header_row)
+            except Exception:
+                continue
+
+            # reject obviously bad parses
+            headers = candidate["headers_normalized"]
+            non_empty = [h for h in headers if h and not h.startswith("unnamed:")]
+            if len(non_empty) < 2:
+                continue
+
+            key = (candidate["header_signature"], candidate["header_row"], candidate["delimiter"])
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+
+            candidates.append(candidate)
+
+    if not candidates:
+        raise HTTPException(status_code=400, detail="Could not detect a valid table in CSV")
+
+    candidates.sort(key=lambda x: x.get("confidence", 0), reverse=True)
+    return candidates[:5]
+
+
+def _analyze_xlsx_candidates(raw: bytes) -> List[Dict[str, Any]]:
+    try:
+        # first sheet only for now
+        df = pd.read_excel(io.BytesIO(raw), engine="openpyxl", dtype=str)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to read XLSX: {e}")
+
+    df = _clean_df(df)
+    if df.empty:
+        raise HTTPException(status_code=400, detail="Parsed XLSX is empty")
+
+    candidate = _build_candidate(
+        df=df,
+        encoding="binary",
+        delimiter=",",
+        header_row=0,
+        reason="Detected first worksheet table",
+    )
+    return [candidate]
+
+
+@app.post("/imports/analyze-candidates")
+async def analyze_candidates(file: UploadFile = File(...)) -> Dict[str, Any]:
+    name = (file.filename or "").lower()
+    raw = await file.read()
+
+    if not raw:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    if name.endswith(".csv"):
+        candidates = _analyze_csv_candidates(raw)
+    elif name.endswith(".xlsx"):
+        candidates = _analyze_xlsx_candidates(raw)
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported file type (use .csv or .xlsx)")
+
+    return {"candidates": candidates}
+
+
+class DirectImportRow(BaseModel):
+    row: Optional[int] = None
+    csv_row: Optional[int] = None
+    doc: str = ""
+    date: str
+    text: str = ""
+    amount: float
+    currency: str = "CHF"
+    fx: float = 1.0
+    debit: str
+    credit: str
+    vatCode: str = ""
+    vatAccount: str = ""
+    reference_nr: str = ""
+
+
+class DirectImportPostRequest(BaseModel):
+    rows: List[DirectImportRow] = Field(default_factory=list)
+    auto_reference_nr: bool = True
+    batch_size: int = 25
+    sleep_between_batches: float = 2.0
+    max_retries: int = 5
+    dry_run: bool = False
+
+
+def _get_bexio_session_or_401(request: Request) -> Tuple[str, Dict[str, Any]]:
+    sid = request.cookies.get(BEXIO_SESSION_COOKIE, "")
+    sess = _bexio_sessions.get(sid, {})
+    if not sid or not sess or not sess.get("access_token"):
+        raise HTTPException(status_code=401, detail="Not connected to bexio")
+    return sid, sess
+
+
+def _get_valid_access_token(sid: str, sess: Dict[str, Any]) -> str:
+    access_token = str(sess.get("access_token") or "")
+    expires_at = int(sess.get("expires_at") or 0)
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Not connected to bexio")
+
+    if expires_at and time.time() >= max(0, expires_at - 30):
+        refreshed = _refresh_access_token(sid, sess)
+        if refreshed:
+            access_token = refreshed
+            return access_token
+
+    return access_token
+
+
+def _parse_date_to_iso_strict(raw: str) -> str:
+    s = (raw or "").strip()
+    if not s:
+        return ""
+
+    m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", s)
+    if m:
+        y, mo, d = map(int, m.groups())
+        return dt_date(y, mo, d).isoformat()
+
+    m = re.fullmatch(r"(\d{1,2})\.(\d{1,2})\.(\d{2,4})\.?", s)
+    if m:
+        d, mo, y = m.groups()
+        d = int(d)
+        mo = int(mo)
+        y = int(y)
+        if y < 100:
+            y += 2000 if y <= 69 else 1900
+        return dt_date(y, mo, d).isoformat()
+
+    try:
+        d = pd.to_datetime(s, dayfirst=True, errors="coerce")
+        if pd.isna(d):
+            return ""
+        return d.date().isoformat()
+    except Exception:
+        return ""
+
+
+def _fetch_json_list(url: str, headers: Dict[str, str], timeout: int = 20) -> List[Dict[str, Any]]:
+    r = requests.get(url, headers=headers, timeout=timeout)
+    if r.status_code >= 400:
+        return []
+    payload = r.json()
+    if isinstance(payload, list):
+        return [x for x in payload if isinstance(x, dict)]
+    return []
+
+
+def _build_account_lookup(access_token: str) -> Tuple[Dict[str, int], Dict[int, int]]:
+    headers = _auth(access_token)
+    accounts = _fetch_json_list(f"{BEXIO_API_V3}/accounting/accounts", headers) or _fetch_json_list(
+        f"{BEXIO_API_V2}/accounts", headers
+    )
+
+    by_number: Dict[str, int] = {}
+    by_id: Dict[int, int] = {}
+    for a in accounts:
+        aid_raw = a.get("id")
+        try:
+            aid = int(aid_raw)
+        except Exception:
+            continue
+        by_id[aid] = aid
+        for key in ("account_no", "account_nr", "number"):
+            val = str(a.get(key) or "").strip()
+            if val:
+                by_number[val] = aid
+    return by_number, by_id
+
+
+def _build_currency_lookup(access_token: str) -> Dict[str, int]:
+    headers = _auth(access_token)
+    currencies = _fetch_json_list(f"{BEXIO_API_V3}/currencies", headers) or _fetch_json_list(
+        f"{BEXIO_API_V2}/currencies", headers
+    )
+    out: Dict[str, int] = {}
+    for c in currencies:
+        try:
+            cid = int(c.get("id"))
+        except Exception:
+            continue
+        for key in ("code", "name"):
+            raw = str(c.get(key) or "").strip().upper()
+            if raw:
+                out[raw] = cid
+    if "CHF" not in out:
+        out["CHF"] = 1
+    return out
+
+
+def _build_tax_lookup(access_token: str) -> Dict[str, int]:
+    headers = _auth(access_token)
+    taxes = _fetch_json_list(f"{BEXIO_API_V3}/accounting/taxes", headers) or _fetch_json_list(
+        f"{BEXIO_API_V2}/taxes", headers
+    )
+    out: Dict[str, int] = {}
+    for t in taxes:
+        try:
+            tid = int(t.get("id"))
+        except Exception:
+            continue
+        for key in ("code", "name", "title", "text"):
+            raw = str(t.get(key) or "").strip().upper()
+            if raw:
+                out[raw] = tid
+    return out
+
+
+def _resolve_account_id(raw: str, by_number: Dict[str, int], by_id: Dict[int, int]) -> Optional[int]:
+    s = str(raw or "").strip().replace(" ", "")
+    if not s:
+        return None
+    if s in by_number:
+        return by_number[s]
+    try:
+        n = int(float(s))
+    except Exception:
+        return None
+    if n in by_id:
+        return n
+    if str(n) in by_number:
+        return by_number[str(n)]
+    return None
+
+
+def _currency_id_from_input(raw: str, currency_lookup: Dict[str, int]) -> Optional[int]:
+    s = str(raw or "").strip().upper()
+    if not s:
+        s = "CHF"
+    if s in currency_lookup:
+        return currency_lookup[s]
+    try:
+        n = int(float(s))
+        return n
+    except Exception:
+        return None
+
+
+def _post_with_backoff(
+    sid: str,
+    sess: Dict[str, Any],
+    url: str,
+    payload: Dict[str, Any],
+    max_retries: int,
+) -> Tuple[bool, Any]:
+    for attempt in range(max_retries + 1):
+        token = _get_valid_access_token(sid, sess)
+        headers = {**_auth(token), "Content-Type": "application/json"}
+        r = requests.post(url, headers=headers, json=payload, timeout=30)
+
+        if r.status_code == 401 and attempt == 0:
+            refreshed = _refresh_access_token(sid, sess)
+            if refreshed:
+                headers = {**_auth(refreshed), "Content-Type": "application/json"}
+                r = requests.post(url, headers=headers, json=payload, timeout=30)
+
+        if r.status_code < 400:
+            return True, r
+
+        if r.status_code not in (429, 500, 502, 503, 504) or attempt == max_retries:
+            try:
+                return False, f"HTTP {r.status_code}: {r.text}"
+            except Exception:
+                return False, f"HTTP {r.status_code}"
+
+        sleep_s = 0.8 * (2 ** attempt) + random.uniform(0, 0.25)
+        time.sleep(sleep_s)
+
+    return False, "Max retries exceeded"
+
+
+def _model_dump_compat(row: BaseModel) -> Dict[str, Any]:
+    if hasattr(row, "model_dump"):
+        return row.model_dump()
+    return row.dict()  # type: ignore[attr-defined]
+
+
+def _rows_to_csv_bytes(rows: List[Dict[str, Any]]) -> bytes:
+    columns = [
+        "row",
+        "csv_row",
+        "doc",
+        "date",
+        "text",
+        "amount",
+        "currency",
+        "fx",
+        "debit",
+        "credit",
+        "vatCode",
+        "vatAccount",
+        "reference_nr",
+    ]
+    out = io.StringIO()
+    writer = csv.DictWriter(out, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row)
+    return out.getvalue().encode("utf-8")
+
+
+def _history_tenant_context_or_401(request: Request) -> Tuple[str, str]:
+    sid, sess = _get_bexio_session_or_401(request)
+    return _ensure_tenant_context(sid, sess)
+
+
+@app.get("/imports/history")
+def imports_history(request: Request, limit: int = Query(default=100, ge=1, le=500)) -> Dict[str, Any]:
+    tenant_id, tenant_name = _history_tenant_context_or_401(request)
+    items = list_import_history(db_engine, tenant_id=tenant_id, limit=limit)
+    return {"tenant_id": tenant_id, "tenant_name": tenant_name, "items": items}
+
+
+@app.get("/imports/history/{import_id}/csv")
+def imports_history_csv(import_id: str, request: Request) -> StreamingResponse:
+    tenant_id, _tenant_name = _history_tenant_context_or_401(request)
+    try:
+        csv_bytes, file_name = get_import_history_csv(db_engine, tenant_id=tenant_id, import_id=import_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
+    )
+
+
+@app.get("/imports/history/{import_id}")
+def imports_history_item(import_id: str, request: Request) -> Dict[str, Any]:
+    tenant_id, _tenant_name = _history_tenant_context_or_401(request)
+    try:
+        item = get_import_history_item(db_engine, tenant_id=tenant_id, import_id=import_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return item
+
+
+@app.delete("/imports/history/{import_id}")
+def imports_history_delete(import_id: str, request: Request) -> Dict[str, Any]:
+    tenant_id, _tenant_name = _history_tenant_context_or_401(request)
+    deleted = delete_import_history(db_engine, tenant_id=tenant_id, import_id=import_id)
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="Import history item not found")
+    return {"deleted": True, "import_id": import_id}
+
+
+@app.post("/bexio/direct-import/post")
+def post_direct_import_to_bexio(payload: DirectImportPostRequest, request: Request) -> Dict[str, Any]:
+    sid, sess = _get_bexio_session_or_401(request)
+    if not payload.rows:
+        raise HTTPException(status_code=400, detail="No rows provided")
+
+    access_token = _get_valid_access_token(sid, sess)
+    account_by_number, account_by_id = _build_account_lookup(access_token)
+    currency_lookup = _build_currency_lookup(access_token)
+    tax_lookup = _build_tax_lookup(access_token)
+
+    next_ref_nr_url = f"{BEXIO_API_V3}/accounting/manual_entries/next_ref_nr"
+    manual_entries_url = f"{BEXIO_API_V3}/accounting/manual_entries"
+
+    batch_size = max(1, min(200, int(payload.batch_size or 25)))
+    sleep_between_batches = max(0.0, float(payload.sleep_between_batches or 0.0))
+    max_retries = max(0, min(8, int(payload.max_retries or 5)))
+
+    results: List[Dict[str, Any]] = []
+    row_indices = list(range(len(payload.rows)))
+
+    for start in range(0, len(row_indices), batch_size):
+        chunk_indices = row_indices[start : start + batch_size]
+
+        for idx in chunk_indices:
+            row = payload.rows[idx]
+            row_no = int(row.row or (idx + 1))
+            csv_row = row.csv_row
+            try:
+                date_iso = _parse_date_to_iso_strict(str(row.date or ""))
+                if not date_iso:
+                    raise ValueError(f"Invalid date in row {row_no}: '{row.date}'")
+
+                amount = abs(float(row.amount or 0))
+                if amount <= 0:
+                    raise ValueError(f"Amount must be > 0 in row {row_no}.")
+
+                debit_id = _resolve_account_id(row.debit, account_by_number, account_by_id)
+                credit_id = _resolve_account_id(row.credit, account_by_number, account_by_id)
+                if not debit_id or not credit_id:
+                    raise ValueError(f"Unknown debit/credit account in row {row_no}.")
+
+                currency_raw = str(row.currency or "CHF").strip().upper()
+                currency_id = _currency_id_from_input(currency_raw, currency_lookup)
+                if not currency_id:
+                    raise ValueError(f"Unknown currency '{currency_raw}' in row {row_no}.")
+
+                rate = float(row.fx or 1.0)
+                currency_factor = 1.0 if currency_raw == "CHF" or int(currency_id) == 1 else rate
+                if currency_factor <= 0:
+                    raise ValueError(f"Invalid exchange rate in row {row_no}.")
+
+                tax_id = None
+                vat_code = str(row.vatCode or "").strip().upper()
+                if vat_code:
+                    tax_id = tax_lookup.get(vat_code)
+                    if not tax_id:
+                        raise ValueError(f"VAT code '{vat_code}' not mapped in row {row_no}.")
+
+                entry: Dict[str, Any] = {
+                    "debit_account_id": int(debit_id),
+                    "credit_account_id": int(credit_id),
+                    "amount": float(amount),
+                    "description": str(row.text or "").strip(),
+                    "currency_id": int(currency_id),
+                    "currency_factor": float(currency_factor),
+                }
+                if tax_id:
+                    entry["tax_id"] = int(tax_id)
+                    vat_account = str(row.vatAccount or "").strip()
+                    if vat_account:
+                        tax_account_id = _resolve_account_id(vat_account, account_by_number, account_by_id)
+                        if tax_account_id:
+                            entry["tax_account_id"] = int(tax_account_id)
+
+                reference_nr = str(row.reference_nr or "").strip()
+                if payload.auto_reference_nr and not reference_nr:
+                    ref_resp = requests.get(next_ref_nr_url, headers=_auth(_get_valid_access_token(sid, sess)), timeout=20)
+                    if ref_resp.status_code < 400:
+                        reference_nr = str((ref_resp.json() or {}).get("next_ref_nr") or "").strip()
+
+                request_payload: Dict[str, Any] = {
+                    "type": "manual_single_entry",
+                    "date": date_iso,
+                    "entries": [entry],
+                }
+                if reference_nr:
+                    request_payload["reference_nr"] = reference_nr
+
+                if payload.dry_run:
+                    results.append(
+                        {
+                            "row": row_no,
+                            "csv_row": csv_row,
+                            "status": "DRY_RUN",
+                            "reference_nr": reference_nr,
+                            "payload": request_payload,
+                        }
+                    )
+                    continue
+
+                ok, resp = _post_with_backoff(sid, sess, manual_entries_url, request_payload, max_retries)
+                if ok:
+                    created_id = None
+                    try:
+                        created_id = (resp.json() or {}).get("id")
+                    except Exception:
+                        created_id = None
+                    results.append(
+                        {
+                            "row": row_no,
+                            "csv_row": csv_row,
+                            "status": "OK",
+                            "id": created_id,
+                            "reference_nr": reference_nr,
+                        }
+                    )
+                else:
+                    results.append(
+                        {
+                            "row": row_no,
+                            "csv_row": csv_row,
+                            "status": "ERROR",
+                            "error": str(resp),
+                        }
+                    )
+            except Exception as e:
+                results.append(
+                    {
+                        "row": row_no,
+                        "csv_row": csv_row,
+                        "status": "ERROR",
+                        "error": str(e),
+                    }
+                )
+
+        if sleep_between_batches and (start + batch_size) < len(row_indices):
+            time.sleep(sleep_between_batches)
+
+    ok_count = sum(1 for r in results if r.get("status") == "OK")
+    dry_count = sum(1 for r in results if r.get("status") == "DRY_RUN")
+    error_count = sum(1 for r in results if r.get("status") == "ERROR")
+    history_import_id = None
+    history_warning = None
+    try:
+        tenant_id, tenant_name = _ensure_tenant_context(sid, sess)
+        payload_rows = [_model_dump_compat(r) for r in payload.rows]
+        history_import_id = insert_import_history(
+            db_engine,
+            tenant_id=tenant_id,
+            tenant_name=tenant_name,
+            payload_rows=payload_rows,
+            results=results,
+            csv_bytes=_rows_to_csv_bytes(payload_rows),
+        )
+    except Exception as e:
+        history_warning = f"History persistence failed: {e}"
+
+    return {
+        "import_id": history_import_id,
+        "ok_count": ok_count,
+        "dry_run_count": dry_count,
+        "error_count": error_count,
+        "total": len(results),
+        "results": results,
+        "history_warning": history_warning,
+    }

@@ -5,7 +5,7 @@ const APP_HOST = "app.bp-pilot.ch";
 const MARKETING_HOSTS = new Set(["bp-pilot.ch", "www.bp-pilot.ch"]);
 
 // paths that belong to the app, not the marketing site
-const APP_PATHS = ["/login", "/upload", "/preview", "/spreadsheet"];
+const APP_PATHS = ["/login", "/upload", "/preview", "/spreadsheet", "/direct-import"];
 
 export function middleware(req: NextRequest) {
   const host = (req.headers.get("host") || "").split(":")[0];

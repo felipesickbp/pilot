@@ -46,6 +46,7 @@ export type NormalizedRow = {
   sollAccount: string;
   habenAccount: string;
   vatCode: string;
+  vatAccount?: string;
   amountDiagnostics?: AmountDiagnostics;
   originalRow?: Record<string, string>;
 };

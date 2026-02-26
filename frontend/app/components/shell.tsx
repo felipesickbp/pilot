@@ -2,14 +2,13 @@
 
 import Link from "next/link";
 import clsx from "clsx";
-import { Settings } from "lucide-react";
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 const nav = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/upload", label: "Upload Files" },
   { href: "/posting-rules", label: "Posting Rules" },
-  { href: "/clients", label: "Direct Import" },
+  { href: "/direct-import", label: "Direct Import" },
   { href: "/history", label: "History" },
 ];
 
@@ -36,9 +35,7 @@ export function AppShell({
             </div>
           </div>
 
-          <button className="rounded-xl p-2 hover:bg-slate-100" aria-label="Settings">
-            <Settings className="h-5 w-5 text-slate-600" />
-          </button>
+          <BexioConnectButton />
         </div>
       </header>
 
@@ -80,5 +77,79 @@ export function AppShell({
         {children}
       </main>
     </div>
+  );
+}
+
+type BexioSession = {
+  connected: boolean;
+  client_name: string;
+};
+
+function BexioConnectButton() {
+  const apiBase = useMemo(() => process.env.NEXT_PUBLIC_API_BASE || "/api", []);
+  const [session, setSession] = useState<BexioSession>({ connected: false, client_name: "" });
+  const [loading, setLoading] = useState(true);
+  const [connecting, setConnecting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`${apiBase}/bexio/session`, {
+          method: "GET",
+          credentials: "include",
+        });
+        if (!r.ok) return;
+        const data = (await r.json()) as BexioSession;
+        if (!cancelled) {
+          setSession({
+            connected: !!data.connected,
+            client_name: data.client_name || "",
+          });
+        }
+      } catch {}
+      if (!cancelled) setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBase]);
+
+  async function onConnect() {
+    try {
+      setConnecting(true);
+      const reconnect = session.connected ? "true" : "false";
+      const r = await fetch(`${apiBase}/bexio/connect?reconnect=${reconnect}`, {
+        method: "GET",
+        credentials: "include",
+      });
+      if (!r.ok) throw new Error("Failed to start bexio login.");
+      const data = (await r.json()) as { auth_url?: string };
+      if (!data.auth_url) throw new Error("Missing auth URL.");
+      window.location.href = data.auth_url;
+    } catch (e) {
+      setConnecting(false);
+      console.error(e);
+      alert("Could not start bexio login.");
+    }
+  }
+
+  const label = connecting
+    ? "Connecting..."
+    : session.connected && session.client_name
+      ? session.client_name
+      : "Connect to bexio";
+
+  return (
+    <button
+      type="button"
+      onClick={onConnect}
+      disabled={connecting || loading}
+      className="max-w-[320px] truncate rounded-xl border border-[color:var(--bp-border)] bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+      title={label}
+      aria-label={session.connected ? "Reconnect bexio" : "Connect to bexio"}
+    >
+      {loading ? "Connect to bexio" : label}
+    </button>
   );
 }

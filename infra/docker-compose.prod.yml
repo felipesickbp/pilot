@@ -2,11 +2,13 @@ services:
   caddy:
     image: caddy:2
     restart: unless-stopped
+    env_file:
+      - ../.env
     ports:
       - "80:80"
       - "443:443"
     environment:
-      - DOMAIN=${DOMAIN}
+      - DOMAIN=${DOMAIN:-app.bp-pilot.ch}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -19,6 +21,8 @@ services:
     build:
       context: ../frontend
     restart: unless-stopped
+    env_file:
+      - ../.env
     environment:
       - NEXT_PUBLIC_API_BASE=/api
 
@@ -26,9 +30,11 @@ services:
     build:
       context: ../backend
     restart: unless-stopped
+    env_file:
+      - ../.env
     environment:
-      - CORS_ORIGINS=https://${DOMAIN}
-      - DATABASE_URL=postgresql://copilot:${POSTGRES_PASSWORD}@postgres:5432/copilot
+      - CORS_ORIGINS=https://${DOMAIN:-app.bp-pilot.ch}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://copilot:${POSTGRES_PASSWORD:-devpass}@postgres:5432/copilot}
       # Optional später für MinIO/S3:
       # - S3_ENDPOINT=http://minio:9000
       # - S3_ACCESS_KEY=${MINIO_ROOT_USER}
@@ -40,19 +46,23 @@ services:
   postgres:
     image: postgres:16
     restart: unless-stopped
+    env_file:
+      - ../.env
     environment:
       - POSTGRES_DB=copilot
       - POSTGRES_USER=copilot
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-devpass}
     volumes:
       - pg_data:/var/lib/postgresql/data
 
   minio:
     image: minio/minio
     restart: unless-stopped
+    env_file:
+      - ../.env
     environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minio}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minio12345}
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
@@ -66,4 +76,3 @@ volumes:
   minio_data:
   caddy_data:
   caddy_config:
-
