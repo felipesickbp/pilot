@@ -1,6 +1,7 @@
 import os
 import io
 import csv
+import base64
 import time
 import uuid
 import secrets
@@ -8,6 +9,7 @@ import random
 import re
 import hmac
 import hashlib
+import json
 import smtplib
 import threading
 from datetime import date as dt_date, datetime, timedelta, timezone
@@ -738,6 +740,97 @@ def _extract_client_name_from_payload(payload: Any) -> str:
     return ""
 
 
+def _decode_jwt_payload(token: str) -> Dict[str, Any]:
+    t = str(token or "").strip()
+    if not t or "." not in t:
+        return {}
+    parts = t.split(".")
+    if len(parts) < 2:
+        return {}
+    payload_b64 = parts[1]
+    padding = "=" * ((4 - len(payload_b64) % 4) % 4)
+    try:
+        raw = base64.urlsafe_b64decode(payload_b64 + padding)
+        data = json.loads(raw.decode("utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _infer_vat_from_scalar(value: Any) -> Optional[bool]:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        try:
+            return bool(int(value))
+        except Exception:
+            return None
+    s = str(value or "").strip().lower()
+    if not s:
+        return None
+    s_norm = s.replace(" ", "_").replace("-", "_")
+    if s_norm in ("0", "false", "none", "no_vat", "without_vat", "ohne_mwst", "exempt", "no_tax"):
+        return False
+    if s_norm in ("1", "true", "with_vat", "mit_mwst", "taxable"):
+        return True
+    if ("ohne" in s and ("mwst" in s or "vat" in s)) or ("no" in s and "vat" in s):
+        return False
+    if ("mit" in s and ("mwst" in s or "vat" in s)) or ("vat" in s and "pflicht" in s):
+        return True
+    return None
+
+
+def _extract_has_vat_from_payload(payload: Any) -> Optional[bool]:
+    bool_like_keys = (
+        "vat_enabled",
+        "is_vat_enabled",
+        "has_vat",
+        "uses_vat",
+        "mwst_enabled",
+        "is_mwst_enabled",
+        "is_vat_liable",
+        "vat_liable",
+    )
+    mode_like_keys = (
+        "vat_mode",
+        "vat_type",
+        "vat_type_id",
+        "mwst_mode",
+        "mwst_type",
+        "mwst_type_id",
+        "tax_mode",
+    )
+    vat_no_keys = ("vat_nr", "vat_number", "mwst_nr", "mwst_number")
+
+    if isinstance(payload, dict):
+        for key in bool_like_keys:
+            if key in payload:
+                inferred = _infer_vat_from_scalar(payload.get(key))
+                if inferred is not None:
+                    return inferred
+        for key in mode_like_keys:
+            if key in payload:
+                inferred = _infer_vat_from_scalar(payload.get(key))
+                if inferred is not None:
+                    return inferred
+        for key in vat_no_keys:
+            v = str(payload.get(key) or "").strip()
+            if v:
+                return True
+
+        for _k, v in payload.items():
+            if isinstance(v, (dict, list)):
+                nested = _extract_has_vat_from_payload(v)
+                if nested is not None:
+                    return nested
+    elif isinstance(payload, list):
+        for item in payload:
+            nested = _extract_has_vat_from_payload(item)
+            if nested is not None:
+                return nested
+    return None
+
+
 def _extract_client_id_from_payload(payload: Any) -> str:
     if isinstance(payload, dict):
         for key in ("id", "tenant_id", "company_id", "uuid", "uid"):
@@ -804,6 +897,9 @@ def _refresh_access_token(sid: str, sess: Dict[str, Any]) -> Optional[str]:
     sess["access_token"] = access_token
     sess["refresh_token"] = data.get("refresh_token") or refresh_token
     sess["expires_at"] = int(time.time()) + int(data.get("expires_in") or 0)
+    id_token = str(data.get("id_token") or "")
+    if id_token:
+        sess["id_token_claims"] = _decode_jwt_payload(id_token)
     _bexio_sessions[sid] = sess
     return access_token
 
@@ -854,22 +950,37 @@ def _fetch_bexio_client_name(sid: str, sess: Dict[str, Any]) -> str:
     return ""
 
 
-def _ensure_tenant_context(sid: str, sess: Dict[str, Any]) -> Tuple[str, str]:
+def _ensure_tenant_context(sid: str, sess: Dict[str, Any]) -> Tuple[str, str, Optional[bool]]:
     tenant_id = str(sess.get("tenant_id") or "").strip()
     tenant_name = str(sess.get("client_name") or "").strip()
+    has_vat = sess.get("has_vat")
+    if has_vat is not None:
+        has_vat = bool(has_vat)
 
     # If we only have the generic fallback name, retry profile lookup to resolve real client name.
-    if tenant_id and tenant_name and not _is_placeholder_client_name(tenant_name):
-        return tenant_id, tenant_name
+    if tenant_id and tenant_name and not _is_placeholder_client_name(tenant_name) and has_vat is not None:
+        return tenant_id, tenant_name, has_vat
 
     profile = _fetch_company_profile(sid, sess)
     if profile:
         profile_tenant_id = _extract_client_id_from_payload(profile)
         profile_tenant_name = _extract_client_name_from_payload(profile)
+        profile_has_vat = _extract_has_vat_from_payload(profile)
         if profile_tenant_id:
             tenant_id = f"bexio:{profile_tenant_id}"
         if profile_tenant_name:
             tenant_name = profile_tenant_name
+        if profile_has_vat is not None:
+            has_vat = profile_has_vat
+
+    # Fallback to ID token claims if company profile name is not available.
+    claims = sess.get("id_token_claims")
+    if _is_placeholder_client_name(tenant_name) and isinstance(claims, dict):
+        claim_name = _extract_client_name_from_payload(claims)
+        if claim_name:
+            tenant_name = claim_name
+    if has_vat is None and isinstance(claims, dict):
+        has_vat = _extract_has_vat_from_payload(claims)
 
     if not tenant_id:
         tenant_id = f"session:{sid}"
@@ -878,8 +989,9 @@ def _ensure_tenant_context(sid: str, sess: Dict[str, Any]) -> Tuple[str, str]:
 
     sess["tenant_id"] = tenant_id
     sess["client_name"] = tenant_name
+    sess["has_vat"] = has_vat
     _bexio_sessions[sid] = sess
-    return tenant_id, tenant_name
+    return tenant_id, tenant_name, has_vat
 
 
 @app.get("/bexio/session")
@@ -890,13 +1002,15 @@ def bexio_session(request: Request):
     connected = bool(sess.get("access_token"))
     client_name = str(sess.get("client_name") or "").strip()
     tenant_id = str(sess.get("tenant_id") or "").strip()
-    should_refresh_context = (not tenant_id) or _is_placeholder_client_name(client_name)
+    has_vat = sess.get("has_vat")
+    should_refresh_context = (not tenant_id) or _is_placeholder_client_name(client_name) or has_vat is None
     if connected and sid and should_refresh_context:
-        tenant_id, client_name = _ensure_tenant_context(sid, sess)
+        tenant_id, client_name, has_vat = _ensure_tenant_context(sid, sess)
     return {
         "connected": connected,
         "client_name": client_name if connected else "",
         "tenant_id": tenant_id if connected else "",
+        "has_vat": bool(has_vat) if connected and has_vat is not None else None,
     }
 
 
@@ -970,6 +1084,8 @@ def bexio_callback(
         "refresh_token": token_data.get("refresh_token"),
         "expires_at": int(time.time()) + int(token_data.get("expires_in") or 0),
         "client_name": "",
+        "has_vat": None,
+        "id_token_claims": _decode_jwt_payload(str(token_data.get("id_token") or "")),
     }
     _bexio_sessions[sid] = new_sess
     _ensure_tenant_context(sid, new_sess)
@@ -1520,7 +1636,8 @@ def _rows_to_csv_bytes(rows: List[Dict[str, Any]]) -> bytes:
 
 def _history_tenant_context_or_401(request: Request) -> Tuple[str, str]:
     sid, sess = _get_bexio_session_or_401(request)
-    return _ensure_tenant_context(sid, sess)
+    tenant_id, tenant_name, _has_vat = _ensure_tenant_context(sid, sess)
+    return tenant_id, tenant_name
 
 
 @app.get("/imports/history")
@@ -1534,7 +1651,7 @@ def imports_history(request: Request, limit: int = Query(default=100, ge=1, le=5
 def bexio_accounts(request: Request) -> Dict[str, Any]:
     sid, sess = _get_bexio_session_or_401(request)
     access_token = _get_valid_access_token(sid, sess)
-    tenant_id, tenant_name = _ensure_tenant_context(sid, sess)
+    tenant_id, tenant_name, _has_vat = _ensure_tenant_context(sid, sess)
 
     cache = sess.get("accounts_cache")
     now_ts = int(time.time())
@@ -1775,7 +1892,7 @@ def post_direct_import_to_bexio(payload: DirectImportPostRequest, request: Reque
     history_import_id = None
     history_warning = None
     try:
-        tenant_id, tenant_name = _ensure_tenant_context(sid, sess)
+        tenant_id, tenant_name, _has_vat = _ensure_tenant_context(sid, sess)
         payload_rows = [_model_dump_compat(r) for r in payload.rows]
         history_import_id = insert_import_history(
             db_engine,

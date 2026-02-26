@@ -78,12 +78,15 @@ export default function SpreadsheetPage() {
   const [applyingRules, setApplyingRules] = useState(false);
   const [autoRulesDone, setAutoRulesDone] = useState(false);
   const [activeCell, setActiveCell] = useState<string>("");
+  const [vatEnabled, setVatEnabled] = useState(true);
 
   useEffect(() => {
     const stored = safeParse<any[]>(sessionStorage.getItem(STORAGE_KEY));
     const meta = safeParse<any>(sessionStorage.getItem(STORAGE_META_KEY));
 
     const selectedBankAccount = meta?.bankAccount ? String(meta.bankAccount) : "1020";
+    const vatMode = String(meta?.vatMode || "with").toLowerCase();
+    setVatEnabled(vatMode !== "without");
     if (meta?.fileType) setFileTypeBadge(String(meta.fileType).toUpperCase());
 
     if (stored?.length) {
@@ -113,8 +116,8 @@ export default function SpreadsheetPage() {
           direction,
           sollAccount,
           habenAccount,
-          vatCode: String(r?.vatCode || ""),
-          vatAccount: String(r?.vatAccount || ""),
+          vatCode: vatMode === "without" ? "" : String(r?.vatCode || ""),
+          vatAccount: vatMode === "without" ? "" : String(r?.vatAccount || ""),
           originalRow: r?.originalRow,
         } as Row;
       });
@@ -132,8 +135,8 @@ export default function SpreadsheetPage() {
           direction: "DBIT",
           sollAccount: "",
           habenAccount: meta?.bankAccount || "1020",
-          vatCode: "",
-          vatAccount: "",
+          vatCode: vatMode === "without" ? "" : "",
+          vatAccount: vatMode === "without" ? "" : "",
         },
       ]);
       setToast("Keine importierten Zeilen in der Session gefunden. Bitte zuerst eine Datei via Upload importieren.");
@@ -323,8 +326,8 @@ export default function SpreadsheetPage() {
         fx: Number(r.fx || 1),
         debit: r.sollAccount,
         credit: r.habenAccount,
-        vatCode: r.vatCode || "",
-        vatAccount: r.vatAccount || "",
+        vatCode: vatEnabled ? r.vatCode || "" : "",
+        vatAccount: vatEnabled ? r.vatAccount || "" : "",
         reference_nr: "",
       }));
 
@@ -412,6 +415,7 @@ export default function SpreadsheetPage() {
             <div className="text-sm text-slate-500">
               Fehlende Soll/Haben-Konten können per Autocomplete und Buchungsregeln ergänzt werden.
             </div>
+            {!vatEnabled ? <div className="mt-1 text-xs text-slate-500">MWST ist für diesen Mandanten deaktiviert.</div> : null}
             {loadingConfig ? <div className="mt-1 text-xs text-slate-500">Kontenplan und Regeln werden geladen...</div> : null}
           </div>
           <div className="w-40">
@@ -447,14 +451,14 @@ export default function SpreadsheetPage() {
                     <th className="w-[140px] p-3 text-left">Betrag</th>
                     <th className="w-[140px] p-3 text-left">Soll</th>
                     <th className="w-[140px] p-3 text-left">Haben</th>
-                    <th className="w-[120px] p-3 text-left">MWST</th>
+                    {vatEnabled ? <th className="w-[120px] p-3 text-left">MWST</th> : null}
                     <th className="w-[90px] p-3 text-left">Aktion</th>
                   </tr>
                 </thead>
 
                 <tbody className="text-slate-700">
                   {rows.map((r) => {
-                    const vatMissing = !r.vatCode;
+                    const vatMissing = vatEnabled && !r.vatCode;
 
                     return (
                       <tr key={r.id} className="border-t border-[color:var(--bp-border)]">
@@ -488,16 +492,18 @@ export default function SpreadsheetPage() {
 
                         <td className="p-3">{accountCell(r, "habenAccount")}</td>
 
-                        <td className="p-3">
-                          <div className={`rounded-lg border px-2 py-1 ${vatMissing ? "border-pink-200 bg-pink-50" : "border-[color:var(--bp-border)] bg-white"}`}>
-                            <input
-                              className="w-full bg-transparent outline-none"
-                              placeholder="e.g. VB81"
-                              value={r.vatCode}
-                              onChange={(e) => updateRow(r.id, { vatCode: e.target.value })}
-                            />
-                          </div>
-                        </td>
+                        {vatEnabled ? (
+                          <td className="p-3">
+                            <div className={`rounded-lg border px-2 py-1 ${vatMissing ? "border-pink-200 bg-pink-50" : "border-[color:var(--bp-border)] bg-white"}`}>
+                              <input
+                                className="w-full bg-transparent outline-none"
+                                placeholder="z. B. VB81"
+                                value={r.vatCode}
+                                onChange={(e) => updateRow(r.id, { vatCode: e.target.value })}
+                              />
+                            </div>
+                          </td>
+                        ) : null}
                         <td className="p-3">
                           <Button
                             variant="outline"

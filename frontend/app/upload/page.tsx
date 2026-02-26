@@ -29,6 +29,7 @@ export default function UploadPage() {
 
   const [bankAccount, setBankAccount] = useState("1020");
   const [vatMode, setVatMode] = useState<"with" | "without">("with");
+  const [hasVat, setHasVat] = useState<boolean | null>(null);
   const [fileName, setFileName] = useState("");
   const [candidateCount, setCandidateCount] = useState(0);
   const [bestSummary, setBestSummary] = useState<string>("");
@@ -44,9 +45,13 @@ export default function UploadPage() {
           credentials: "include",
         });
         if (!r.ok) return;
-        const data = (await r.json()) as { connected?: boolean; client_name?: string };
+        const data = (await r.json()) as { connected?: boolean; client_name?: string; has_vat?: boolean | null };
         if (!cancelled) {
           setClientName(data.connected ? String(data.client_name || "") : "");
+          const vat = typeof data.has_vat === "boolean" ? data.has_vat : null;
+          setHasVat(vat);
+          if (vat === true) setVatMode("with");
+          if (vat === false) setVatMode("without");
         }
       } catch {}
     })();
@@ -146,26 +151,12 @@ export default function UploadPage() {
             </div>
 
             <div className="grid gap-2">
-              <div className="text-xs font-semibold text-slate-600">MWST-Status (Demo)</div>
-              <div className="flex items-center gap-3 text-sm">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="vat"
-                    checked={vatMode === "with"}
-                    onChange={() => setVatMode("with")}
-                  />
-                  Mit MWST <Badge variant="pink">MWST</Badge>
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="vat"
-                    checked={vatMode === "without"}
-                    onChange={() => setVatMode("without")}
-                  />
-                  Ohne MWST
-                </label>
+              <div className="text-xs font-semibold text-slate-600">MWST-Status (automatisch aus bexio)</div>
+              <div className="h-10 rounded-xl border border-[color:var(--bp-border)] bg-slate-50 px-3 text-sm text-slate-700 flex items-center justify-between">
+                <span>
+                  {hasVat === true ? "Mit MWST" : hasVat === false ? "Ohne MWST" : "Nicht eindeutig erkennbar (Standard: Mit MWST)"}
+                </span>
+                <Badge variant={hasVat === false ? "default" : "pink"}>{vatMode === "with" ? "MWST aktiv" : "MWST aus"}</Badge>
               </div>
             </div>
 
