@@ -299,6 +299,9 @@ function Footer() {
 
         <div>
           <div className="footer-head">Rechtliches</div>
+          <a className="footer-link" href="/terms">
+            Terms & Agreements
+          </a>
           <a className="footer-link" href="#">
             Impressum
           </a>

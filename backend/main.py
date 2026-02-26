@@ -6,7 +6,11 @@ import uuid
 import secrets
 import random
 import re
-from datetime import date as dt_date
+import hmac
+import hashlib
+import smtplib
+from datetime import date as dt_date, datetime, timedelta, timezone
+from email.message import EmailMessage
 from urllib.parse import urlencode
 from typing import Any, Dict, List, Tuple, Optional
 
@@ -33,6 +37,20 @@ from app.services.posting_rules_store import (
     insert_posting_rule,
     list_posting_rules,
 )
+from app.services.auth_store import (
+    create_auth_session,
+    create_email_challenge,
+    create_user,
+    delete_auth_session,
+    get_auth_session,
+    get_email_challenge,
+    get_user_by_email,
+    increment_challenge_attempts,
+    init_auth_schema,
+    mark_challenge_used,
+    set_user_verified,
+    touch_auth_session,
+)
 
 app = FastAPI()
 
@@ -50,6 +68,7 @@ db_engine = get_engine()
 
 @app.on_event("startup")
 def _startup() -> None:
+    init_auth_schema(db_engine)
     init_history_schema(db_engine)
     init_posting_rules_schema(db_engine)
 
@@ -62,6 +81,298 @@ def health():
 @app.get("/clients")
 def clients():
     return [{"id": "demo", "name": "Demo Mandant"}]
+
+
+# ------------------------------------------------------------
+# App Authentication (email + password + email OTP)
+# ------------------------------------------------------------
+
+AUTH_SESSION_COOKIE = "bp_auth_sid"
+AUTH_SESSION_TTL_HOURS = int(os.getenv("AUTH_SESSION_TTL_HOURS", "24"))
+AUTH_OTP_TTL_MINUTES = int(os.getenv("AUTH_OTP_TTL_MINUTES", "10"))
+AUTH_OTP_MAX_ATTEMPTS = int(os.getenv("AUTH_OTP_MAX_ATTEMPTS", "6"))
+AUTH_EMAIL_FROM = os.getenv("AUTH_EMAIL_FROM", "no-reply@bp-pilot.ch")
+AUTH_SMTP_HOST = os.getenv("AUTH_SMTP_HOST", "")
+AUTH_SMTP_PORT = int(os.getenv("AUTH_SMTP_PORT", "587"))
+AUTH_SMTP_USER = os.getenv("AUTH_SMTP_USER", "")
+AUTH_SMTP_PASS = os.getenv("AUTH_SMTP_PASS", "")
+AUTH_SMTP_TLS = os.getenv("AUTH_SMTP_TLS", "true").lower() in ("1", "true", "yes")
+AUTH_CODE_PEPPER = os.getenv("AUTH_CODE_PEPPER", "")
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _iso(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).isoformat()
+
+
+def _parse_iso(raw: str) -> datetime:
+    try:
+        dt = datetime.fromisoformat(str(raw))
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return datetime.fromtimestamp(0, tz=timezone.utc)
+
+
+def _is_secure_request(request: Request) -> bool:
+    proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "").lower()
+    return proto == "https"
+
+
+def _normalize_email(raw: str) -> str:
+    return str(raw or "").strip().lower()
+
+
+def _validate_email(raw: str) -> str:
+    email = _normalize_email(raw)
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise HTTPException(status_code=400, detail="Invalid email address.")
+    return email
+
+
+def _password_hash(password: str) -> str:
+    iterations = 240000
+    salt = secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), iterations)
+    return f"pbkdf2_sha256${iterations}${salt}${dk.hex()}"
+
+
+def _password_verify(password: str, stored: str) -> bool:
+    try:
+        algo, iters_raw, salt_hex, digest_hex = str(stored).split("$", 3)
+        if algo != "pbkdf2_sha256":
+            return False
+        iterations = int(iters_raw)
+        dk = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            bytes.fromhex(salt_hex),
+            iterations,
+        )
+        return hmac.compare_digest(dk.hex(), digest_hex)
+    except Exception:
+        return False
+
+
+def _code_hash(code: str) -> str:
+    material = f"{code}:{AUTH_CODE_PEPPER}".encode("utf-8")
+    return hashlib.sha256(material).hexdigest()
+
+
+def _send_email_code(*, email: str, code: str, purpose: str) -> None:
+    if not AUTH_SMTP_HOST:
+        raise HTTPException(status_code=500, detail="Email service is not configured.")
+
+    title = "BP Pilot verification code"
+    if purpose == "register":
+        title = "BP Pilot registration verification"
+    elif purpose == "login":
+        title = "BP Pilot login verification"
+
+    msg = EmailMessage()
+    msg["Subject"] = title
+    msg["From"] = AUTH_EMAIL_FROM
+    msg["To"] = email
+    msg.set_content(
+        "\n".join(
+            [
+                f"Your verification code is: {code}",
+                "",
+                f"This code expires in {AUTH_OTP_TTL_MINUTES} minutes.",
+                "If you did not request this, you can ignore this email.",
+            ]
+        )
+    )
+
+    try:
+        with smtplib.SMTP(AUTH_SMTP_HOST, AUTH_SMTP_PORT, timeout=20) as smtp:
+            if AUTH_SMTP_TLS:
+                smtp.starttls()
+            if AUTH_SMTP_USER:
+                smtp.login(AUTH_SMTP_USER, AUTH_SMTP_PASS)
+            smtp.send_message(msg)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Could not send verification email.")
+
+
+def _set_auth_cookie(response: Response, request: Request, sid: str) -> None:
+    response.set_cookie(
+        key=AUTH_SESSION_COOKIE,
+        value=sid,
+        httponly=True,
+        samesite="lax",
+        secure=_is_secure_request(request),
+        max_age=AUTH_SESSION_TTL_HOURS * 3600,
+        path="/",
+    )
+
+
+def _clear_auth_cookie(response: Response, request: Request) -> None:
+    response.delete_cookie(
+        key=AUTH_SESSION_COOKIE,
+        path="/",
+        samesite="lax",
+        secure=_is_secure_request(request),
+    )
+
+
+def _get_auth_session_or_401(request: Request) -> Dict[str, Any]:
+    sid = request.cookies.get(AUTH_SESSION_COOKIE, "")
+    if not sid:
+        raise HTTPException(status_code=401, detail="Not authenticated.")
+
+    sess = get_auth_session(db_engine, session_id=sid)
+    if not sess:
+        raise HTTPException(status_code=401, detail="Not authenticated.")
+
+    expires_at = _parse_iso(str(sess.get("expires_at") or ""))
+    if expires_at <= _utc_now():
+        delete_auth_session(db_engine, session_id=sid)
+        raise HTTPException(status_code=401, detail="Session expired.")
+
+    new_expiry = _utc_now() + timedelta(hours=AUTH_SESSION_TTL_HOURS)
+    touch_auth_session(db_engine, session_id=sid, expires_at=_iso(new_expiry))
+    return sess
+
+
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+    accept_terms: bool
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class VerifyRequest(BaseModel):
+    challenge_id: str
+    code: str
+
+
+@app.post("/auth/register")
+def auth_register(payload: RegisterRequest) -> Dict[str, Any]:
+    email = _validate_email(payload.email)
+    password = str(payload.password or "")
+    if len(password) < 10:
+        raise HTTPException(status_code=400, detail="Password must be at least 10 characters.")
+    if not payload.accept_terms:
+        raise HTTPException(status_code=400, detail="You must accept terms and agreements.")
+
+    existing = get_user_by_email(db_engine, email=email)
+    if existing:
+        raise HTTPException(status_code=409, detail="Email already registered.")
+
+    user = create_user(
+        db_engine,
+        email=email,
+        password_hash=_password_hash(password),
+        terms_accepted=True,
+    )
+    code = f"{secrets.randbelow(1000000):06d}"
+    challenge = create_email_challenge(
+        db_engine,
+        user_id=str(user["user_id"]),
+        email=email,
+        purpose="register",
+        code_hash=_code_hash(code),
+        expires_at=_iso(_utc_now() + timedelta(minutes=AUTH_OTP_TTL_MINUTES)),
+    )
+    _send_email_code(email=email, code=code, purpose="register")
+    return {
+        "challenge_id": challenge["challenge_id"],
+        "expires_in_seconds": AUTH_OTP_TTL_MINUTES * 60,
+        "purpose": "register",
+    }
+
+
+@app.post("/auth/login")
+def auth_login(payload: LoginRequest) -> Dict[str, Any]:
+    email = _validate_email(payload.email)
+    password = str(payload.password or "")
+    user = get_user_by_email(db_engine, email=email)
+    if not user or not _password_verify(password, str(user.get("password_hash") or "")):
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+    code = f"{secrets.randbelow(1000000):06d}"
+    challenge = create_email_challenge(
+        db_engine,
+        user_id=str(user["user_id"]),
+        email=email,
+        purpose="login",
+        code_hash=_code_hash(code),
+        expires_at=_iso(_utc_now() + timedelta(minutes=AUTH_OTP_TTL_MINUTES)),
+    )
+    _send_email_code(email=email, code=code, purpose="login")
+    return {
+        "challenge_id": challenge["challenge_id"],
+        "expires_in_seconds": AUTH_OTP_TTL_MINUTES * 60,
+        "purpose": "login",
+    }
+
+
+@app.post("/auth/verify")
+def auth_verify(payload: VerifyRequest, request: Request, response: Response) -> Dict[str, Any]:
+    challenge_id = str(payload.challenge_id or "").strip()
+    code = str(payload.code or "").strip()
+    if not challenge_id or not re.fullmatch(r"\d{6}", code):
+        raise HTTPException(status_code=400, detail="Invalid verification payload.")
+
+    challenge = get_email_challenge(db_engine, challenge_id=challenge_id)
+    if not challenge:
+        raise HTTPException(status_code=404, detail="Verification challenge not found.")
+    if challenge.get("used_at"):
+        raise HTTPException(status_code=400, detail="Verification challenge already used.")
+    if int(challenge.get("attempts") or 0) >= AUTH_OTP_MAX_ATTEMPTS:
+        raise HTTPException(status_code=429, detail="Too many verification attempts.")
+    if _parse_iso(str(challenge.get("expires_at") or "")) <= _utc_now():
+        raise HTTPException(status_code=400, detail="Verification code expired.")
+
+    if not hmac.compare_digest(str(challenge.get("code_hash") or ""), _code_hash(code)):
+        increment_challenge_attempts(db_engine, challenge_id=challenge_id)
+        raise HTTPException(status_code=401, detail="Invalid verification code.")
+
+    mark_challenge_used(db_engine, challenge_id=challenge_id)
+    user_id = str(challenge.get("user_id") or "")
+    email = _normalize_email(str(challenge.get("email") or ""))
+    purpose = str(challenge.get("purpose") or "")
+    if purpose == "register":
+        set_user_verified(db_engine, user_id=user_id)
+
+    sess = create_auth_session(
+        db_engine,
+        user_id=user_id,
+        email=email,
+        expires_at=_iso(_utc_now() + timedelta(hours=AUTH_SESSION_TTL_HOURS)),
+    )
+    _set_auth_cookie(response, request, str(sess["session_id"]))
+    return {"authenticated": True, "email": email}
+
+
+@app.get("/auth/session")
+def auth_session(request: Request) -> Dict[str, Any]:
+    try:
+        sess = _get_auth_session_or_401(request)
+    except HTTPException:
+        return {"authenticated": False, "email": ""}
+    return {
+        "authenticated": True,
+        "email": str(sess.get("email") or ""),
+    }
+
+
+@app.post("/auth/logout")
+def auth_logout(request: Request, response: Response) -> Dict[str, Any]:
+    sid = request.cookies.get(AUTH_SESSION_COOKIE, "")
+    if sid:
+        delete_auth_session(db_engine, session_id=sid)
+    _clear_auth_cookie(response, request)
+    return {"ok": True}
 
 
 # ------------------------------------------------------------
@@ -104,7 +415,7 @@ def _get_or_create_sid(request: Request, response: Response) -> str:
         value=sid,
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=_is_secure_request(request),
         max_age=60 * 60 * 24 * 30,
         path="/",
     )
@@ -307,6 +618,7 @@ def _ensure_tenant_context(sid: str, sess: Dict[str, Any]) -> Tuple[str, str]:
 
 @app.get("/bexio/session")
 def bexio_session(request: Request):
+    _get_auth_session_or_401(request)
     sid = request.cookies.get(BEXIO_SESSION_COOKIE)
     sess = _bexio_sessions.get(sid or "", {})
     connected = bool(sess.get("access_token"))
@@ -328,6 +640,7 @@ def bexio_connect(
     response: Response,
     reconnect: bool = Query(default=False),
 ):
+    _get_auth_session_or_401(request)
     if not BEXIO_CLIENT_ID or not BEXIO_CLIENT_SECRET:
         raise HTTPException(status_code=500, detail="Missing BEXIO_CLIENT_ID / BEXIO_CLIENT_SECRET")
 
@@ -358,6 +671,7 @@ def bexio_callback(
     code: str = Query(default=""),
     state: str = Query(default=""),
 ):
+    _get_auth_session_or_401(request)
     sid = request.cookies.get(BEXIO_SESSION_COOKIE, "")
     sess = _bexio_sessions.get(sid, {})
     expected_state = str(sess.get("oauth_state") or "")
@@ -687,6 +1001,7 @@ class PostingRuleResponse(BaseModel):
 
 
 def _get_bexio_session_or_401(request: Request) -> Tuple[str, Dict[str, Any]]:
+    _get_auth_session_or_401(request)
     sid = request.cookies.get(BEXIO_SESSION_COOKIE, "")
     sess = _bexio_sessions.get(sid, {})
     if not sid or not sess or not sess.get("access_token"):
