@@ -105,6 +105,7 @@ AUTH_SMTP_USER = os.getenv("AUTH_SMTP_USER", "")
 AUTH_SMTP_PASS = os.getenv("AUTH_SMTP_PASS", "")
 AUTH_SMTP_TLS = os.getenv("AUTH_SMTP_TLS", "true").lower() in ("1", "true", "yes")
 AUTH_CODE_PEPPER = os.getenv("AUTH_CODE_PEPPER", "")
+AUTH_APP_BASE_URL = os.getenv("AUTH_APP_BASE_URL", "https://app.bp-pilot.ch")
 
 _rate_lock = threading.Lock()
 _rate_hits: Dict[str, List[float]] = {}
@@ -209,7 +210,7 @@ def _code_hash(code: str) -> str:
     return hashlib.sha256(material).hexdigest()
 
 
-def _send_email_code(*, email: str, code: str, purpose: str) -> None:
+def _send_email_code(*, email: str, code: str, purpose: str, challenge_id: str = "") -> None:
     if not AUTH_SMTP_HOST:
         raise HTTPException(status_code=500, detail="Email service is not configured.")
 
@@ -223,15 +224,31 @@ def _send_email_code(*, email: str, code: str, purpose: str) -> None:
     msg["Subject"] = title
     msg["From"] = AUTH_EMAIL_FROM
     msg["To"] = email
-    msg.set_content(
-        "\n".join(
+    lines = [
+        f"Your verification code is: {code}",
+        "",
+        f"This code expires in {AUTH_OTP_TTL_MINUTES} minutes.",
+    ]
+    if purpose == "reset" and challenge_id:
+        link = (
+            f"{AUTH_APP_BASE_URL}/login?mode=reset&step=verify"
+            f"&challenge_id={challenge_id}&code={code}&email={email}"
+        )
+        lines.extend(
             [
-                f"Your verification code is: {code}",
                 "",
-                f"This code expires in {AUTH_OTP_TTL_MINUTES} minutes.",
-                "If you did not request this, you can ignore this email.",
+                "Reset password directly here:",
+                link,
             ]
         )
+    lines.extend(
+        [
+            "",
+            "If you did not request this, you can ignore this email.",
+        ]
+    )
+    msg.set_content(
+        "\n".join(lines)
     )
 
     try:
@@ -333,7 +350,12 @@ def _create_and_send_challenge(*, user_id: str, email: str, purpose: str) -> Dic
         code_hash=_code_hash(code),
         expires_at=_iso(_utc_now() + timedelta(minutes=AUTH_OTP_TTL_MINUTES)),
     )
-    _send_email_code(email=email, code=code, purpose=purpose)
+    _send_email_code(
+        email=email,
+        code=code,
+        purpose=purpose,
+        challenge_id=str(challenge.get("challenge_id") or ""),
+    )
     return challenge
 
 

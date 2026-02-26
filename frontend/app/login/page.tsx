@@ -52,6 +52,23 @@ export default function LoginPage() {
     };
   }, [apiBase, router]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search || "");
+    const modeParam = String(params.get("mode") || "").toLowerCase();
+    const stepParam = String(params.get("step") || "").toLowerCase();
+    const challengeParam = String(params.get("challenge_id") || "");
+    const codeParam = String(params.get("code") || "");
+    const emailParam = String(params.get("email") || "");
+
+    if (modeParam === "reset") {
+      setMode("reset");
+      if (emailParam) setEmail(emailParam);
+      if (challengeParam) setChallengeId(challengeParam);
+      if (codeParam) setCode(codeParam);
+      if (stepParam === "verify" || challengeParam) setStep("verify");
+    }
+  }, []);
+
   function postJson(path: string, body: Record<string, unknown>) {
     return fetch(`${apiBase}${path}`, {
       method: "POST",
