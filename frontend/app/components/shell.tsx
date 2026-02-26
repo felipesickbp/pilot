@@ -45,6 +45,7 @@ export function AppShell({
               <Settings className="h-4 w-4" />
             </Link>
             <BexioConnectButton />
+            <LogoutButton />
           </div>
         </div>
       </header>
@@ -160,6 +161,59 @@ function BexioConnectButton() {
       aria-label={session.connected ? "Reconnect bexio" : "Connect to bexio"}
     >
       {loading ? "Connect to bexio" : label}
+    </button>
+  );
+}
+
+function LogoutButton() {
+  const apiBase = useMemo(() => process.env.NEXT_PUBLIC_API_BASE || "/api", []);
+  const [csrfToken, setCsrfToken] = useState("");
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`${apiBase}/auth/csrf`, {
+          method: "GET",
+          credentials: "include",
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!cancelled) setCsrfToken(String(data?.csrf_token || ""));
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBase]);
+
+  async function onLogout() {
+    if (!csrfToken || loggingOut) return;
+    try {
+      setLoggingOut(true);
+      await fetch(`${apiBase}/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "x-csrf-token": csrfToken,
+        },
+      });
+    } finally {
+      window.location.href = "/login";
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onLogout}
+      disabled={!csrfToken || loggingOut}
+      className="rounded-xl border border-[color:var(--bp-border)] bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+      title="Logout"
+      aria-label="Logout"
+    >
+      {loggingOut ? "Logging out..." : "Logout"}
     </button>
   );
 }
