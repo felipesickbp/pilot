@@ -27,6 +27,12 @@ from app.services.history_store import (
     insert_import_history,
     list_import_history,
 )
+from app.services.posting_rules_store import (
+    delete_posting_rule,
+    init_posting_rules_schema,
+    insert_posting_rule,
+    list_posting_rules,
+)
 
 app = FastAPI()
 
@@ -45,6 +51,7 @@ db_engine = get_engine()
 @app.on_event("startup")
 def _startup() -> None:
     init_history_schema(db_engine)
+    init_posting_rules_schema(db_engine)
 
 
 @app.get("/health")
@@ -630,6 +637,23 @@ class DirectImportPostRequest(BaseModel):
     dry_run: bool = False
 
 
+class PostingRuleCreateRequest(BaseModel):
+    keyword: str
+    account_no: str
+    side: str = "auto"
+
+
+class PostingRuleResponse(BaseModel):
+    rule_id: str
+    created_at: str
+    tenant_id: str
+    field: str
+    op: str
+    keyword: str
+    account_no: str
+    side: str
+
+
 def _get_bexio_session_or_401(request: Request) -> Tuple[str, Dict[str, Any]]:
     sid = request.cookies.get(BEXIO_SESSION_COOKIE, "")
     sess = _bexio_sessions.get(sid, {})
@@ -712,6 +736,42 @@ def _build_account_lookup(access_token: str) -> Tuple[Dict[str, int], Dict[int, 
             if val:
                 by_number[val] = aid
     return by_number, by_id
+
+
+def _list_accounts_for_suggestions(access_token: str) -> List[Dict[str, Any]]:
+    headers = _auth(access_token)
+    accounts = _fetch_json_list(f"{BEXIO_API_V3}/accounting/accounts", headers) or _fetch_json_list(
+        f"{BEXIO_API_V2}/accounts", headers
+    )
+    out: List[Dict[str, Any]] = []
+    for a in accounts:
+        aid_raw = a.get("id")
+        try:
+            aid = int(aid_raw)
+        except Exception:
+            continue
+
+        number = ""
+        for key in ("account_no", "account_nr", "number"):
+            val = str(a.get(key) or "").strip()
+            if val:
+                number = val
+                break
+        if not number:
+            continue
+
+        name = str(a.get("name") or a.get("label") or a.get("title") or "").strip()
+        out.append(
+            {
+                "id": aid,
+                "number": number,
+                "name": name,
+                "display": f"{number} {name}".strip(),
+            }
+        )
+
+    out.sort(key=lambda x: (str(x.get("number") or ""), str(x.get("name") or "")))
+    return out
 
 
 def _build_currency_lookup(access_token: str) -> Dict[str, int]:
@@ -855,6 +915,72 @@ def imports_history(request: Request, limit: int = Query(default=100, ge=1, le=5
     tenant_id, tenant_name = _history_tenant_context_or_401(request)
     items = list_import_history(db_engine, tenant_id=tenant_id, limit=limit)
     return {"tenant_id": tenant_id, "tenant_name": tenant_name, "items": items}
+
+
+@app.get("/bexio/accounts")
+def bexio_accounts(request: Request) -> Dict[str, Any]:
+    sid, sess = _get_bexio_session_or_401(request)
+    access_token = _get_valid_access_token(sid, sess)
+    tenant_id, tenant_name = _ensure_tenant_context(sid, sess)
+
+    cache = sess.get("accounts_cache")
+    now_ts = int(time.time())
+    if isinstance(cache, dict):
+        cached_tenant = str(cache.get("tenant_id") or "")
+        cached_until = int(cache.get("expires_at") or 0)
+        cached_items = cache.get("items")
+        if cached_tenant == tenant_id and cached_until > now_ts and isinstance(cached_items, list):
+            return {"tenant_id": tenant_id, "tenant_name": tenant_name, "items": cached_items}
+
+    items = _list_accounts_for_suggestions(access_token)
+    sess["accounts_cache"] = {
+        "tenant_id": tenant_id,
+        "expires_at": now_ts + 1800,
+        "items": items,
+    }
+    _bexio_sessions[sid] = sess
+    return {"tenant_id": tenant_id, "tenant_name": tenant_name, "items": items}
+
+
+@app.get("/posting-rules")
+def get_posting_rules(request: Request) -> Dict[str, Any]:
+    tenant_id, tenant_name = _history_tenant_context_or_401(request)
+    items = list_posting_rules(db_engine, tenant_id=tenant_id)
+    return {"tenant_id": tenant_id, "tenant_name": tenant_name, "items": items}
+
+
+@app.post("/posting-rules")
+def create_posting_rule(payload: PostingRuleCreateRequest, request: Request) -> PostingRuleResponse:
+    tenant_id, _tenant_name = _history_tenant_context_or_401(request)
+
+    keyword = str(payload.keyword or "").strip()
+    account_no = str(payload.account_no or "").strip()
+    side = str(payload.side or "auto").strip().lower()
+
+    if not keyword:
+        raise HTTPException(status_code=400, detail="keyword is required")
+    if not account_no:
+        raise HTTPException(status_code=400, detail="account_no is required")
+    if side not in ("auto", "soll", "haben"):
+        raise HTTPException(status_code=400, detail="side must be auto, soll, or haben")
+
+    item = insert_posting_rule(
+        db_engine,
+        tenant_id=tenant_id,
+        keyword=keyword,
+        account_no=account_no,
+        side=side,
+    )
+    return PostingRuleResponse(**item)
+
+
+@app.delete("/posting-rules/{rule_id}")
+def remove_posting_rule(rule_id: str, request: Request) -> Dict[str, Any]:
+    tenant_id, _tenant_name = _history_tenant_context_or_401(request)
+    deleted = delete_posting_rule(db_engine, tenant_id=tenant_id, rule_id=rule_id)
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="Posting rule not found")
+    return {"deleted": True, "rule_id": rule_id}
 
 
 @app.get("/imports/history/{import_id}/csv")

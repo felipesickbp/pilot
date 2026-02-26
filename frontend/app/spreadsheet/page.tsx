@@ -4,10 +4,33 @@ import React, { useEffect, useMemo, useState } from "react";
 import { AppShell } from "../components/shell";
 import { FlowStepper } from "../components/stepper";
 import { Badge, Button, Card, CardContent, CardHeader, Subhead } from "../components/ui";
-import { Send } from "lucide-react";
-import { type NormalizedRow } from "../importer";
+import { Send, Wand2 } from "lucide-react";
+import { type NormalizedRow, safeText } from "../importer";
 
 type Row = NormalizedRow;
+
+type PostResultRow = {
+  row: number;
+  csv_row?: number;
+  status: string;
+  id?: number;
+  reference_nr?: string;
+  error?: string;
+};
+
+type AccountItem = {
+  id: number;
+  number: string;
+  name: string;
+  display: string;
+};
+
+type PostingRule = {
+  rule_id: string;
+  keyword: string;
+  account_no: string;
+  side: "auto" | "soll" | "haben";
+};
 
 const STORAGE_KEY = "bp_pilot_direct_import_rows_v1";
 const STORAGE_META_KEY = "bp_pilot_direct_import_meta_v1";
@@ -21,14 +44,24 @@ function safeParse<T>(s: string | null): T | null {
   }
 }
 
-type PostResultRow = {
-  row: number;
-  csv_row?: number;
-  status: string;
-  id?: number;
-  reference_nr?: string;
-  error?: string;
-};
+function normalizeAccountNo(raw: string): string {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  const m = s.match(/^(\d{3,})/);
+  return m ? m[1] : s;
+}
+
+function ruleMatches(rule: PostingRule, row: Row): boolean {
+  const kw = safeText(rule.keyword).toLowerCase();
+  if (!kw) return false;
+  return safeText(row.description).toLowerCase().includes(kw);
+}
+
+function targetFieldForRule(rule: PostingRule, row: Row): "sollAccount" | "habenAccount" {
+  if (rule.side === "soll") return "sollAccount";
+  if (rule.side === "haben") return "habenAccount";
+  return row.direction === "DBIT" ? "sollAccount" : "habenAccount";
+}
 
 export default function SpreadsheetPage() {
   const apiBase = useMemo(() => process.env.NEXT_PUBLIC_API_BASE || "/api", []);
@@ -39,6 +72,13 @@ export default function SpreadsheetPage() {
   const [submitSummary, setSubmitSummary] = useState<string>("");
   const [submitResults, setSubmitResults] = useState<PostResultRow[]>([]);
 
+  const [accounts, setAccounts] = useState<AccountItem[]>([]);
+  const [rules, setRules] = useState<PostingRule[]>([]);
+  const [loadingConfig, setLoadingConfig] = useState(true);
+  const [applyingRules, setApplyingRules] = useState(false);
+  const [autoRulesDone, setAutoRulesDone] = useState(false);
+  const [activeCell, setActiveCell] = useState<string>("");
+
   useEffect(() => {
     const stored = safeParse<any[]>(sessionStorage.getItem(STORAGE_KEY));
     const meta = safeParse<any>(sessionStorage.getItem(STORAGE_META_KEY));
@@ -47,10 +87,9 @@ export default function SpreadsheetPage() {
     if (meta?.fileType) setFileTypeBadge(String(meta.fileType).toUpperCase());
 
     if (stored?.length) {
-      // Backward compatibility: support old debit/credit keys and normalize to soll/haben.
       const normalized = stored.map((r, idx) => {
         const parsedAmount = Number(r?.amount ?? 0);
-        const amount = Number.isFinite(parsedAmount) ? parsedAmount : 0;
+        const amount = Number.isFinite(parsedAmount) ? Math.abs(parsedAmount) : 0;
         const direction: "CRDT" | "DBIT" =
           r?.direction === "DBIT" || r?.direction === "CRDT"
             ? r.direction
@@ -82,7 +121,6 @@ export default function SpreadsheetPage() {
 
       setRows(normalized);
     } else {
-      // Demo fallback
       setRows([
         {
           id: "DI0001",
@@ -103,6 +141,95 @@ export default function SpreadsheetPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function loadConfig() {
+      setLoadingConfig(true);
+      try {
+        const [accountsRes, rulesRes] = await Promise.all([
+          fetch(`${apiBase}/bexio/accounts`, { method: "GET", credentials: "include" }),
+          fetch(`${apiBase}/posting-rules`, { method: "GET", credentials: "include" }),
+        ]);
+
+        const accountsData = await accountsRes.json().catch(() => ({}));
+        const rulesData = await rulesRes.json().catch(() => ({}));
+
+        if (!cancelled) {
+          if (accountsRes.ok) {
+            setAccounts(Array.isArray(accountsData?.items) ? accountsData.items : []);
+          }
+          if (rulesRes.ok) {
+            setRules(Array.isArray(rulesData?.items) ? rulesData.items : []);
+          }
+          if (!accountsRes.ok && !rulesRes.ok) {
+            setToast("Could not load account plan / rules. You can still fill accounts manually.");
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          setToast("Could not load account plan / rules. You can still fill accounts manually.");
+        }
+      } finally {
+        if (!cancelled) setLoadingConfig(false);
+      }
+    }
+
+    loadConfig();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBase]);
+
+  function persistRows(next: Row[]) {
+    setRows(next);
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  }
+
+  function applyRulesToRows(source: "auto" | "manual") {
+    if (!rows.length || !rules.length) {
+      if (source === "manual") setToast("Keine Buchungsregeln vorhanden.");
+      return;
+    }
+
+    setApplyingRules(true);
+    let changed = 0;
+
+    const next = rows.map((r) => {
+      let row = { ...r };
+      for (const rule of rules) {
+        if (!ruleMatches(rule, row)) continue;
+        const target = targetFieldForRule(rule, row);
+        if (!safeText((row as any)[target])) {
+          (row as any)[target] = normalizeAccountNo(rule.account_no);
+          changed += 1;
+        }
+      }
+      return row;
+    });
+
+    persistRows(next);
+    setApplyingRules(false);
+
+    if (source === "manual") {
+      setToast(changed ? `Buchungsregeln angewendet: ${changed} Feld(er) automatisch befüllt.` : "Keine passenden Regeln für offene Kontofelder gefunden.");
+    } else if (changed) {
+      setToast(`Automatisch ${changed} Kontofelder aus Buchungsregeln vorausgefüllt.`);
+    }
+  }
+
+  useEffect(() => {
+    if (autoRulesDone) return;
+    if (loadingConfig) return;
+    if (!rows.length) return;
+    if (!rules.length) {
+      setAutoRulesDone(true);
+      return;
+    }
+    applyRulesToRows("auto");
+    setAutoRulesDone(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadingConfig, rules.length, rows.length, autoRulesDone]);
+
   const completedCount = useMemo(() => {
     return rows.filter((r) => r.sollAccount && r.habenAccount).length;
   }, [rows]);
@@ -113,11 +240,59 @@ export default function SpreadsheetPage() {
   }, [completedCount, rows.length]);
 
   function updateRow(id: string, patch: Partial<Row>) {
-    setRows((prev) => {
-      const next = prev.map((r) => (r.id === id ? { ...r, ...patch } : r));
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      return next;
-    });
+    const next = rows.map((r) => (r.id === id ? { ...r, ...patch } : r));
+    persistRows(next);
+  }
+
+  function accountSuggestions(query: string) {
+    const q = safeText(query).toLowerCase();
+    if (!q) return [] as AccountItem[];
+    return accounts
+      .filter((a) => a.number.toLowerCase().includes(q) || safeText(a.name).toLowerCase().includes(q))
+      .slice(0, 6);
+  }
+
+  function accountCell(row: Row, field: "sollAccount" | "habenAccount") {
+    const value = String((row as any)[field] || "");
+    const key = `${row.id}:${field}`;
+    const items = activeCell === key ? accountSuggestions(value) : [];
+    const missing = !value;
+
+    return (
+      <div className={`relative rounded-lg border px-2 py-1 ${missing ? "border-pink-200 bg-pink-50" : "border-[color:var(--bp-border)] bg-white"}`}>
+        <input
+          className="w-full bg-transparent outline-none"
+          placeholder={field === "sollAccount" ? "Soll" : "Haben"}
+          value={value}
+          list="account-options-global"
+          onFocus={() => setActiveCell(key)}
+          onBlur={() => {
+            const normalized = normalizeAccountNo(value);
+            if (normalized !== value) updateRow(row.id, { [field]: normalized } as Partial<Row>);
+            window.setTimeout(() => setActiveCell((prev) => (prev === key ? "" : prev)), 120);
+          }}
+          onChange={(e) => updateRow(row.id, { [field]: e.target.value } as Partial<Row>)}
+        />
+        {items.length ? (
+          <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-20 rounded-xl border border-[color:var(--bp-border)] bg-white p-1 shadow-lg">
+            {items.map((a) => (
+              <button
+                key={`${key}-${a.id}`}
+                type="button"
+                className="block w-full rounded-lg px-2 py-1 text-left text-xs hover:bg-slate-50"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  updateRow(row.id, { [field]: a.number } as Partial<Row>);
+                  setActiveCell("");
+                }}
+              >
+                <span className="font-semibold">{a.number}</span> {a.name}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    );
   }
 
   async function submitToBexio() {
@@ -137,7 +312,7 @@ export default function SpreadsheetPage() {
         doc: r.id,
         date: r.date,
         text: r.description,
-        amount: Number(r.amount),
+        amount: Math.abs(Number(r.amount)),
         currency: r.currency || "CHF",
         fx: Number(r.fx || 1),
         debit: r.sollAccount,
@@ -209,9 +384,13 @@ export default function SpreadsheetPage() {
         <div className="flex items-center gap-3">
           <div className="text-xl font-semibold">✨ Transaction Data</div>
           <Badge variant="blue">{fileTypeBadge}</Badge>
+          {rules.length ? <Badge variant="pink">{rules.length} Buchungsregeln</Badge> : null}
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => applyRulesToRows("manual")} disabled={applyingRules || !rules.length}>
+            <Wand2 className="h-4 w-4" /> {applyingRules ? "Applying..." : "Buchungsregeln anwenden"}
+          </Button>
           <Button onClick={submitToBexio} disabled={submitting}>
             <Send className="h-4 w-4" /> {submitting ? "Submitting..." : "Submit to Bexio"}
           </Button>
@@ -225,8 +404,9 @@ export default function SpreadsheetPage() {
               {completedCount} of {rows.length} transactions completed
             </div>
             <div className="text-sm text-slate-500">
-              Fill missing Soll/Haben accounts and VAT fields where needed.
+              Missing Soll/Haben fields can be filled via autocomplete and Buchungsregeln.
             </div>
+            {loadingConfig ? <div className="mt-1 text-xs text-slate-500">Loading account plan and rules...</div> : null}
           </div>
           <div className="w-40">
             <div className="h-2 rounded-full bg-slate-100">
@@ -236,6 +416,14 @@ export default function SpreadsheetPage() {
           </div>
         </CardContent>
       </Card>
+
+      <datalist id="account-options-global">
+        {accounts.map((a) => (
+          <option key={`global-${a.id}-${a.number}`} value={`${a.number} ${a.name}`}>
+            {a.display}
+          </option>
+        ))}
+      </datalist>
 
       <div className="mt-6">
         <Card>
@@ -258,8 +446,6 @@ export default function SpreadsheetPage() {
 
                 <tbody className="text-slate-700">
                   {rows.map((r) => {
-                    const sollMissing = !r.sollAccount;
-                    const habenMissing = !r.habenAccount;
                     const vatMissing = !r.vatCode;
 
                     return (
@@ -280,7 +466,7 @@ export default function SpreadsheetPage() {
 
                         <td className="p-3">
                           <div className="rounded-lg border border-[color:var(--bp-border)] bg-sky-50 px-2 py-1">
-                            {Number(r.amount).toFixed(2)}
+                            {Math.abs(Number(r.amount)).toFixed(2)}
                           </div>
                         </td>
 
@@ -296,27 +482,9 @@ export default function SpreadsheetPage() {
                           <Badge variant={r.direction === "DBIT" ? "pink" : "blue"}>{r.direction || "—"}</Badge>
                         </td>
 
-                        <td className="p-3">
-                          <div className={`rounded-lg border px-2 py-1 ${sollMissing ? "border-pink-200 bg-pink-50" : "border-[color:var(--bp-border)] bg-white"}`}>
-                            <input
-                              className="w-full bg-transparent outline-none"
-                              placeholder="Soll"
-                              value={r.sollAccount}
-                              onChange={(e) => updateRow(r.id, { sollAccount: e.target.value })}
-                            />
-                          </div>
-                        </td>
+                        <td className="p-3">{accountCell(r, "sollAccount")}</td>
 
-                        <td className="p-3">
-                          <div className={`rounded-lg border px-2 py-1 ${habenMissing ? "border-pink-200 bg-pink-50" : "border-[color:var(--bp-border)] bg-white"}`}>
-                            <input
-                              className="w-full bg-transparent outline-none"
-                              placeholder="Haben"
-                              value={r.habenAccount}
-                              onChange={(e) => updateRow(r.id, { habenAccount: e.target.value })}
-                            />
-                          </div>
-                        </td>
+                        <td className="p-3">{accountCell(r, "habenAccount")}</td>
 
                         <td className="p-3">
                           <div className={`rounded-lg border px-2 py-1 ${vatMissing ? "border-pink-200 bg-pink-50" : "border-[color:var(--bp-border)] bg-white"}`}>
