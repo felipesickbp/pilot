@@ -230,10 +230,16 @@ def _send_email_code(*, email: str, code: str, purpose: str, challenge_id: str =
         f"This code expires in {AUTH_OTP_TTL_MINUTES} minutes.",
     ]
     if purpose == "reset" and challenge_id:
-        link = (
-            f"{AUTH_APP_BASE_URL}/login?mode=reset&step=verify"
-            f"&challenge_id={challenge_id}&code={code}&email={email}"
+        query = urlencode(
+            {
+                "mode": "reset",
+                "step": "verify",
+                "challenge_id": challenge_id,
+                "code": code,
+                "email": email,
+            }
         )
+        link = f"{AUTH_APP_BASE_URL}/login?{query}"
         lines.extend(
             [
                 "",
