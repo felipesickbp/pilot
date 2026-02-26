@@ -25,6 +25,7 @@ export default function PreviewPage() {
   const [mapping, setMapping] = useState<PreviewMapping | null>(null);
   const [error, setError] = useState("");
   const [useAutoTextColumns, setUseAutoTextColumns] = useState(true);
+  const [showRawPreview, setShowRawPreview] = useState(false);
 
   useEffect(() => {
     try {
@@ -73,6 +74,29 @@ export default function PreviewPage() {
     if (!ctx || !effectiveMapping || !candidate) return [];
     return normalizeRows(ctx, candidate, effectiveMapping);
   }, [ctx, effectiveMapping, candidate]);
+
+  const rawColumns = useMemo(() => {
+    if (!candidate || !effectiveMapping) return [] as string[];
+    const preferred = [
+      effectiveMapping.dateColumn,
+      effectiveMapping.amountColumn,
+      effectiveMapping.debitColumn,
+      effectiveMapping.creditColumn,
+      effectiveMapping.fallbackAmountColumn,
+      effectiveMapping.currencyColumn,
+      ...effectiveMapping.textColumns,
+    ].filter(Boolean);
+
+    const unique: string[] = [];
+    for (const col of preferred) {
+      if (candidate.headers.includes(col) && !unique.includes(col)) unique.push(col);
+    }
+    for (const col of candidate.headers) {
+      if (unique.length >= 10) break;
+      if (!unique.includes(col)) unique.push(col);
+    }
+    return unique;
+  }, [candidate, effectiveMapping]);
 
   function patchMapping<K extends keyof PreviewMapping>(key: K, value: PreviewMapping[K]) {
     if (!mapping) return;
@@ -166,6 +190,19 @@ export default function PreviewPage() {
   }, [effectiveMapping, normalizedRows]);
 
   const canContinue = validation.errors.length === 0 && normalizedRows.length > 0;
+
+  const templateLabel =
+    (mapping?.bankTemplate || "generic") === "generic"
+      ? "Generisch"
+      : (mapping?.bankTemplate || "generic") === "split_generic"
+        ? "Generisch Split"
+        : (mapping?.bankTemplate || "generic") === "clientis"
+          ? "Clientis"
+          : (mapping?.bankTemplate || "generic") === "ubs"
+            ? "UBS"
+            : "Acrevis";
+
+  const amountModeLabel = (mapping?.amountMode || "single") === "split" ? "Belastung/Gutschrift" : "Einzelspalte";
 
   function goCleanup() {
     if (!ctx || !effectiveMapping || !normalizedRows.length) return;
@@ -502,8 +539,8 @@ export default function PreviewPage() {
           <CardContent>
             <div className="mb-3 flex flex-wrap gap-2 text-xs">
               <Badge variant="blue">{ctx.fileType.toUpperCase()}</Badge>
-              <Badge variant="pink">{mapping.bankTemplate}</Badge>
-              <Badge variant="blue">{mapping.amountMode}</Badge>
+              <Badge variant="pink">{templateLabel}</Badge>
+              <Badge variant="blue">{amountModeLabel}</Badge>
             </div>
 
             <div className="overflow-auto rounded-xl border border-[color:var(--bp-border)] bg-white">
@@ -566,39 +603,53 @@ export default function PreviewPage() {
             </div>
 
             <div className="mt-6">
-              <div className="text-sm font-semibold">Rohdaten-Vorschau (Human-in-the-loop)</div>
-              <Subhead>Direkter Blick in die Originalzeilen inkl. Sammelbuchungen und Rohspalten.</Subhead>
-              <div className="mt-3 overflow-auto rounded-xl border border-[color:var(--bp-border)] bg-white">
-                <table className="w-full text-xs">
-                  <thead className="bg-slate-50 text-slate-600">
-                    <tr>
-                      {candidate.headers.map((h) => (
-                        <th key={h} className="p-2 text-left font-semibold">
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="text-slate-700">
-                    {candidate.rows.slice(0, 12).map((row, idx) => (
-                      <tr key={`raw-${idx}`} className="border-t border-[color:var(--bp-border)]">
-                        {candidate.headers.map((h) => (
-                          <td key={`${idx}-${h}`} className="p-2 whitespace-nowrap">
-                            {safeText(row[h] || "") || "—"}
-                          </td>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold">Rohdaten-Vorschau</div>
+                  <Subhead>Zeigt die Originalzeilen mit Fokus auf relevante Spalten.</Subhead>
+                </div>
+                <Button variant="outline" onClick={() => setShowRawPreview((v) => !v)}>
+                  {showRawPreview ? "Ausblenden" : "Einblenden"}
+                </Button>
+              </div>
+
+              {showRawPreview ? (
+                <div className="mt-3 overflow-auto rounded-xl border border-[color:var(--bp-border)] bg-white">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 text-slate-600">
+                      <tr>
+                        {rawColumns.map((h) => (
+                          <th key={h} className="p-2 text-left font-semibold">
+                            {h}
+                          </th>
                         ))}
                       </tr>
-                    ))}
-                    {!candidate.rows.length ? (
-                      <tr>
-                        <td colSpan={candidate.headers.length || 1} className="p-4 text-center text-slate-500">
-                          Keine Rohzeilen verfügbar.
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="text-slate-700">
+                      {candidate.rows.slice(0, 12).map((row, idx) => (
+                        <tr key={`raw-${idx}`} className="border-t border-[color:var(--bp-border)]">
+                          {rawColumns.map((h) => (
+                            <td key={`${idx}-${h}`} className="p-2 whitespace-nowrap">
+                              {safeText(row[h] || "") || "—"}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                      {!candidate.rows.length ? (
+                        <tr>
+                          <td colSpan={rawColumns.length || 1} className="p-4 text-center text-slate-500">
+                            Keine Rohzeilen verfügbar.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="mt-3 rounded-xl border border-[color:var(--bp-border)] bg-slate-50 p-3 text-xs text-slate-600">
+                  Rohdaten sind standardmässig ausgeblendet, damit das Mapping übersichtlich bleibt.
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
