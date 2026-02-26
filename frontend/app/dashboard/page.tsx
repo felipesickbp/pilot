@@ -96,7 +96,13 @@ export default function DashboardPage() {
           <Stat
             title="Total Clients"
             value={connected ? "1" : "0"}
-            note={connected ? clientName || "Connected bexio client" : "No active bexio connection"}
+            note={
+              connected
+                ? clientName
+                  ? `Connected bexio client ${clientName}`
+                  : "Connected bexio client"
+                : "No active bexio connection"
+            }
             icon={<Users className="h-5 w-5" />}
           />
           <Stat

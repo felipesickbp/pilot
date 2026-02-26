@@ -81,6 +81,7 @@ BEXIO_CLIENT_SECRET = os.getenv("BEXIO_CLIENT_SECRET", "")
 BEXIO_SCOPES = os.getenv("BEXIO_SCOPES", "openid profile email offline_access company_profile")
 BEXIO_REDIRECT_URI = os.getenv("BEXIO_REDIRECT_URI", "")
 BEXIO_SESSION_COOKIE = "bp_bexio_sid"
+FALLBACK_CLIENT_NAME = "Connected bexio client"
 
 # In-memory per-session auth state (sufficient for single-instance MVP).
 _bexio_sessions: Dict[str, Dict[str, Any]] = {}
@@ -110,17 +111,46 @@ def _get_or_create_sid(request: Request, response: Response) -> str:
     return sid
 
 
+def _is_placeholder_client_name(name: str) -> bool:
+    s = str(name or "").strip().lower()
+    return not s or s == FALLBACK_CLIENT_NAME.lower()
+
+
 def _extract_client_name_from_payload(payload: Any) -> str:
+    name_keys_primary = (
+        "name",
+        "company_name",
+        "company",
+        "profile_name",
+        "display_name",
+        "title",
+        "organisation_name",
+        "organization_name",
+        "tenant_name",
+        "legal_name",
+        "firm_name",
+        "firma",
+    )
+
     if isinstance(payload, dict):
-        for key in ("name", "company_name", "company", "title", "organisation_name", "organization_name"):
+        # Common bexio company_profile variants.
+        n1 = str(payload.get("name_1") or payload.get("name1") or "").strip()
+        n2 = str(payload.get("name_2") or payload.get("name2") or "").strip()
+        combined = " ".join(x for x in [n1, n2] if x).strip()
+        if combined:
+            return combined
+
+        for key in name_keys_primary:
             v = payload.get(key)
             if isinstance(v, str) and v.strip():
                 return v.strip()
-        nested = payload.get("data")
-        if nested is not None:
-            nested_name = _extract_client_name_from_payload(nested)
-            if nested_name:
-                return nested_name
+
+        # Try all nested objects, not only "data", because bexio payload structure may vary.
+        for _k, v in payload.items():
+            if isinstance(v, (dict, list)):
+                nested_name = _extract_client_name_from_payload(v)
+                if nested_name:
+                    return nested_name
 
     if isinstance(payload, list):
         for item in payload:
@@ -251,7 +281,8 @@ def _ensure_tenant_context(sid: str, sess: Dict[str, Any]) -> Tuple[str, str]:
     tenant_id = str(sess.get("tenant_id") or "").strip()
     tenant_name = str(sess.get("client_name") or "").strip()
 
-    if tenant_id and tenant_name:
+    # If we only have the generic fallback name, retry profile lookup to resolve real client name.
+    if tenant_id and tenant_name and not _is_placeholder_client_name(tenant_name):
         return tenant_id, tenant_name
 
     profile = _fetch_company_profile(sid, sess)
@@ -265,8 +296,8 @@ def _ensure_tenant_context(sid: str, sess: Dict[str, Any]) -> Tuple[str, str]:
 
     if not tenant_id:
         tenant_id = f"session:{sid}"
-    if not tenant_name:
-        tenant_name = "Connected bexio client"
+    if _is_placeholder_client_name(tenant_name):
+        tenant_name = FALLBACK_CLIENT_NAME
 
     sess["tenant_id"] = tenant_id
     sess["client_name"] = tenant_name
@@ -281,7 +312,8 @@ def bexio_session(request: Request):
     connected = bool(sess.get("access_token"))
     client_name = str(sess.get("client_name") or "").strip()
     tenant_id = str(sess.get("tenant_id") or "").strip()
-    if connected and sid and (not client_name or not tenant_id):
+    should_refresh_context = (not tenant_id) or _is_placeholder_client_name(client_name)
+    if connected and sid and should_refresh_context:
         tenant_id, client_name = _ensure_tenant_context(sid, sess)
     return {
         "connected": connected,
