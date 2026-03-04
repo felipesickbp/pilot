@@ -1435,14 +1435,26 @@ def _parse_date_to_iso_strict(raw: str) -> str:
         return ""
 
 
+def _extract_list_from_payload(payload: Any) -> List[Dict[str, Any]]:
+    if isinstance(payload, list):
+        return [x for x in payload if isinstance(x, dict)]
+    if isinstance(payload, dict):
+        for key in ("items", "data", "results", "result", "value", "taxes", "accounts", "currencies"):
+            val = payload.get(key)
+            if isinstance(val, list):
+                return [x for x in val if isinstance(x, dict)]
+    return []
+
+
 def _fetch_json_list(url: str, headers: Dict[str, str], timeout: int = 20) -> List[Dict[str, Any]]:
     r = requests.get(url, headers=headers, timeout=timeout)
     if r.status_code >= 400:
         return []
-    payload = r.json()
-    if isinstance(payload, list):
-        return [x for x in payload if isinstance(x, dict)]
-    return []
+    try:
+        payload = r.json()
+    except Exception:
+        return []
+    return _extract_list_from_payload(payload)
 
 
 def _build_account_lookup(access_token: str) -> Tuple[Dict[str, int], Dict[int, int]]:
