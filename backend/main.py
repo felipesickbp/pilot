@@ -1596,6 +1596,20 @@ def _resolve_tax_id(
             f"(matches IDs: {', '.join(str(i) for i in token_matches)})."
         )
 
+    # Common Swiss VAT shorthand fallback:
+    # values like "BZB81" may map to a tenant tax code token "BZB".
+    m = re.fullmatch(r"([A-Z]{2,})(\d{2,3})", raw)
+    if m:
+        alpha_code = m.group(1)
+        alpha_matches = token_lookup.get(alpha_code) or []
+        if len(alpha_matches) == 1:
+            return int(alpha_matches[0]), None
+        if len(alpha_matches) > 1:
+            return None, (
+                f"VAT code '{raw}' matched shorthand token '{alpha_code}' but is ambiguous "
+                f"(matches IDs: {', '.join(str(i) for i in alpha_matches)})."
+            )
+
     # Fallback-only override. Tenant lookup is always preferred.
     env_var = _tax_env_var_for_code(raw)
     env_raw = str(os.getenv(env_var, "")).strip()
