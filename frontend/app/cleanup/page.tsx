@@ -161,6 +161,7 @@ export default function CleanupPage() {
       STORAGE_META_KEY,
       JSON.stringify({
         ...(meta || {}),
+        source: (meta as any)?.source || "bank",
         cleanup: {
           globalRules,
           customRemovals,

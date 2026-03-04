@@ -213,6 +213,7 @@ export default function PreviewPage() {
       JSON.stringify({
         fileName: ctx.fileName,
         fileType: ctx.fileType,
+        source: "bank",
         bankAccount: ctx.bankAccount,
         vatMode: ctx.vatMode,
         createdAt: new Date().toISOString(),

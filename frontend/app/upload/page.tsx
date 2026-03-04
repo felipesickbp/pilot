@@ -13,7 +13,7 @@ import {
   Subhead,
   Input,
 } from "../components/ui";
-import { UploadCloud, Landmark, FileText, FileSpreadsheet } from "lucide-react";
+import { UploadCloud, Landmark, FileText, FileSpreadsheet, ClipboardPaste } from "lucide-react";
 import {
   IMPORT_CONTEXT_KEY,
   PREVIEW_META_KEY,
@@ -23,10 +23,26 @@ import {
   parseFileToContext,
 } from "../importer";
 
+type ImportMode = "bank" | "direct";
+type DirectImportRow = {
+  id: string;
+  date: string;
+  description: string;
+  amount: number;
+  currency: string;
+  fx: number;
+  direction: "CRDT" | "DBIT";
+  debitAccount: string;
+  creditAccount: string;
+  vatCode?: string;
+  vatAccount?: string;
+};
+
 export default function UploadPage() {
   const router = useRouter();
   const apiBase = useMemo(() => process.env.NEXT_PUBLIC_API_BASE || "/api", []);
 
+  const [mode, setMode] = useState<ImportMode>("bank");
   const [bankAccount, setBankAccount] = useState("1020");
   const [vatMode, setVatMode] = useState<"with" | "without">("with");
   const [hasVat, setHasVat] = useState<boolean | null>(null);
@@ -35,6 +51,15 @@ export default function UploadPage() {
   const [bestSummary, setBestSummary] = useState<string>("");
   const [error, setError] = useState("");
   const [clientName, setClientName] = useState("");
+  const [paste, setPaste] = useState("");
+  const [defaultCurrency, setDefaultCurrency] = useState("CHF");
+  const [directMessage, setDirectMessage] = useState("");
+
+  React.useEffect(() => {
+    const qp = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("mode") : "";
+    const modeRaw = String(qp || "").toLowerCase();
+    if (modeRaw === "direct") setMode("direct");
+  }, []);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -107,20 +132,57 @@ export default function UploadPage() {
     router.push("/preview");
   }
 
+  function loadDirectToSpreadsheet() {
+    setDirectMessage("");
+    const rows = parseDirectImportRows(paste, defaultCurrency, bankAccount);
+    if (!rows.length) {
+      setDirectMessage("Keine Zeilen erkannt. Bitte TLV/TSV zuerst einfügen.");
+      return;
+    }
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
+    sessionStorage.setItem(
+      STORAGE_META_KEY,
+      JSON.stringify({
+        source: "direct",
+        fileType: "direct",
+        bankAccount,
+        vatMode,
+        createdAt: new Date().toISOString(),
+      })
+    );
+    router.push("/spreadsheet");
+  }
+
   return (
     <AppShell active="Upload">
       <div className="mb-6">
-        <div className="text-3xl font-semibold">Transaktionsdateien hochladen</div>
+        <div className="text-3xl font-semibold">
+          {mode === "bank" ? "Transaktionsdateien hochladen" : "Direktimport (TLV/TSV)"}
+        </div>
         <Subhead>
-          CSV, Excel oder CAMT XML hochladen. Danach Kandidaten prüfen und in Preview mappen.
+          {mode === "bank"
+            ? "CSV, Excel oder CAMT XML hochladen. Danach Kandidaten prüfen und in Preview mappen."
+            : "TLV/TSV aus Excel einfügen und direkt in die Tabelle übernehmen."}
         </Subhead>
       </div>
 
-      <div className="mb-8">
-        <FlowStepper active="Upload" />
+      <div className="mb-6 rounded-2xl border border-[color:var(--bp-border)] bg-white p-2">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <Button variant={mode === "bank" ? "primary" : "outline"} onClick={() => setMode("bank")} type="button">
+            Bank Statement
+          </Button>
+          <Button variant={mode === "direct" ? "primary" : "outline"} onClick={() => setMode("direct")} type="button">
+            Direktimport
+          </Button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+      <div className="mb-8">
+        <FlowStepper active={mode === "bank" ? "Upload" : "Direktimport"} variant={mode === "bank" ? "bank" : "direct"} />
+      </div>
+
+      {mode === "bank" ? (
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2 text-sm font-semibold">
@@ -240,9 +302,157 @@ export default function UploadPage() {
             />
           </CardContent>
         </Card>
-      </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <ClipboardPaste className="h-5 w-5 text-slate-500" />
+                TLV/TSV einfügen
+              </div>
+              <Subhead>Format: Datum, Text, Betrag, Währung, FX, Soll, Haben, MWST-Code, MWST-Konto</Subhead>
+            </CardHeader>
+            <CardContent className="grid gap-4">
+              {directMessage ? (
+                <div className="rounded-xl border border-[color:var(--bp-border)] bg-slate-50 p-3 text-sm text-slate-700">
+                  {directMessage}
+                </div>
+              ) : null}
+
+              <div className="grid gap-2">
+                <div className="text-xs font-semibold text-slate-600">Verbundener bexio-Mandant</div>
+                <div className="flex h-10 items-center rounded-xl border border-[color:var(--bp-border)] bg-slate-50 px-3 text-sm text-slate-700">
+                  {clientName || "Nicht verbunden"}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="grid gap-2">
+                  <div className="text-xs font-semibold text-slate-600">Bankkonto (GL)</div>
+                  <Input value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} placeholder="z. B. 1020" />
+                </div>
+                <div className="grid gap-2">
+                  <div className="text-xs font-semibold text-slate-600">Fallback-Währung</div>
+                  <select
+                    value={defaultCurrency}
+                    onChange={(e) => setDefaultCurrency(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-[color:var(--bp-border)] bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-fuchsia-200"
+                  >
+                    <option value="CHF">CHF</option>
+                    <option value="EUR">EUR</option>
+                    <option value="USD">USD</option>
+                  </select>
+                </div>
+              </div>
+
+              <textarea
+                value={paste}
+                onChange={(e) => setPaste(e.target.value)}
+                placeholder="Excel TLV/TSV hier einfügen (Ctrl+V)"
+                className="min-h-[260px] w-full rounded-xl border border-[color:var(--bp-border)] bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-fuchsia-200"
+              />
+
+              <div className="grid grid-cols-2 gap-3">
+                <Button className="w-full" onClick={loadDirectToSpreadsheet} type="button">
+                  Weiter zu Tabelle →
+                </Button>
+                <Button
+                  className="w-full"
+                  variant="outline"
+                  onClick={() => {
+                    setPaste("");
+                    setDirectMessage("Eingabe geleert.");
+                  }}
+                  type="button"
+                >
+                  Leeren
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border border-[color:var(--bp-border)] bg-slate-50/40">
+            <CardHeader>
+              <div className="text-sm font-semibold text-slate-600">Direktimport Hinweise</div>
+              <Subhead className="text-slate-500">Kein separater Menüpunkt mehr: Direktimport läuft hier in Upload.</Subhead>
+            </CardHeader>
+            <CardContent className="grid gap-3">
+              <FormatRow
+                icon={<FileText className="h-5 w-5" />}
+                title="TLV/TSV Reihenfolge"
+                desc="Datum, Text, Betrag, Währung, FX, Soll, Haben, MWST-Code, MWST-Konto."
+                highlight
+              />
+              <FormatRow
+                icon={<Landmark className="h-5 w-5" />}
+                title="Tenant-spezifische MWST"
+                desc="MWST-Codes werden je bexio-Mandant aufgelöst (nicht global hartcodiert)."
+                highlight
+              />
+              <FormatRow
+                icon={<FileSpreadsheet className="h-5 w-5" />}
+                title="Nächster Schritt"
+                desc="Nach dem Einfügen direkt in Tabelle prüfen und an bexio senden."
+                highlight
+              />
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </AppShell>
   );
+}
+
+function cleanCell(raw: string): string {
+  return (raw ?? "").trim().replace(/^"(.*)"$/, "$1");
+}
+
+function normalizeAmount(raw: string): string {
+  let s = String(raw ?? "").trim();
+  if (!s) return "";
+  s = s.replace(/'/g, "");
+  if (s.includes(",") && !s.includes(".")) s = s.replace(",", ".");
+  if (s.includes(".") && s.includes(",")) s = s.replace(/,/g, "");
+  return s;
+}
+
+function normalizeDate(raw: string): string {
+  const s = String(raw ?? "").trim();
+  const m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  return s;
+}
+
+function parseDirectImportRows(text: string, defaultCurrency: string, bankAccount: string): DirectImportRow[] {
+  const lines = String(text || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((l) => l.replace(/\u00a0/g, " "))
+    .filter((l) => l.length > 0 && l.trim().length > 0);
+
+  return lines.map((line, idx) => {
+    const cells = line.split("\t").map(cleanCell);
+    const amount = Number(normalizeAmount(cells[2] ?? "0")) || 0;
+    const direction: "CRDT" | "DBIT" = amount >= 0 ? "CRDT" : "DBIT";
+    const debitAccount = String(cells[5] ?? "").trim();
+    const creditAccount = String(cells[6] ?? "").trim();
+
+    return {
+      id: `DI${String(idx + 1).padStart(4, "0")}`,
+      date: normalizeDate(cells[0] ?? ""),
+      description: String(cells[1] ?? ""),
+      amount: Math.abs(amount),
+      currency: String(cells[3] ?? defaultCurrency).trim() || defaultCurrency,
+      fx: Number(normalizeAmount(cells[4] ?? "1")) || 1,
+      direction,
+      debitAccount,
+      creditAccount,
+      vatCode: String(cells[7] ?? "").trim(),
+      vatAccount: String(cells[8] ?? "").trim() || bankAccount,
+    };
+  });
 }
 
 function FormatRow({

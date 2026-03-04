@@ -170,7 +170,7 @@ export default function DashboardPage() {
             <CardContent className="grid gap-3">
               <Action title="Neue Datei hochladen" desc="CSV-, XLSX- oder CAMT.053-Dateien verarbeiten" href="/upload" />
               <Action title="Buchungsregeln verwalten" desc="Automatische Kontozuordnungen konfigurieren" href="/posting-rules" />
-              <Action title="Direktimport" desc="TSV einfügen und an Bexio senden" href="/direct-import" />
+              <Action title="Direktimport" desc="TLV/TSV einfügen und an Bexio senden" href="/upload?mode=direct" />
               <div className="pt-2">
                 <a href="/upload" className="block">
                   <Button className="w-full">Upload öffnen</Button>

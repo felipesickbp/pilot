@@ -84,6 +84,7 @@ export default function SpreadsheetPage() {
   const [ruleAccountInput, setRuleAccountInput] = useState("");
   const [ruleSide, setRuleSide] = useState<"auto" | "soll" | "haben">("auto");
   const [ruleSaving, setRuleSaving] = useState(false);
+  const [flowVariant, setFlowVariant] = useState<"bank" | "direct">("bank");
 
   useEffect(() => {
     const stored = safeParse<any[]>(sessionStorage.getItem(STORAGE_KEY));
@@ -91,6 +92,8 @@ export default function SpreadsheetPage() {
 
     const selectedBankAccount = meta?.bankAccount ? String(meta.bankAccount) : "1020";
     const vatMode = String(meta?.vatMode || "with").toLowerCase();
+    const source = String(meta?.source || "").toLowerCase();
+    if (source === "direct") setFlowVariant("direct");
     setVatEnabled(vatMode !== "without");
     if (meta?.fileType) setFileTypeBadge(String(meta.fileType).toUpperCase());
 
@@ -328,7 +331,7 @@ export default function SpreadsheetPage() {
     return (
       <div className={`relative rounded-lg border px-2 py-1 ${missing ? "border-pink-200 bg-pink-50" : "border-[color:var(--bp-border)] bg-white"}`}>
         <input
-          className="w-full bg-transparent outline-none"
+          className="w-full min-w-0 bg-transparent outline-none"
           placeholder={field === "sollAccount" ? "Soll" : "Haben"}
           value={value}
           list="account-options-global"
@@ -438,7 +441,7 @@ export default function SpreadsheetPage() {
       </div>
 
       <div className="mb-8">
-        <FlowStepper active="Tabelle" />
+        <FlowStepper active="Tabelle" variant={flowVariant} />
       </div>
 
       {toast ? (
@@ -500,17 +503,17 @@ export default function SpreadsheetPage() {
             <Subhead>Datum, Konten und MWST sind direkt bearbeitbar. Einzelne Zeilen können gelöscht werden.</Subhead>
           </CardHeader>
           <CardContent>
-            <div className="overflow-auto rounded-xl border border-[color:var(--bp-border)] bg-white">
+            <div className="overflow-x-hidden overflow-y-auto rounded-xl border border-[color:var(--bp-border)] bg-white">
               <table className="w-full table-fixed text-sm">
                 <thead className="bg-slate-50 text-slate-600">
                   <tr>
-                    <th className="w-[130px] p-3 text-left">Datum</th>
-                    <th className="w-[38%] p-3 text-left">Beschreibung</th>
-                    <th className="w-[140px] p-3 text-left">Betrag</th>
-                    <th className="w-[140px] p-3 text-left">Soll</th>
-                    <th className="w-[140px] p-3 text-left">Haben</th>
-                    {vatEnabled ? <th className="w-[120px] p-3 text-left">MWST</th> : null}
-                    <th className="w-[76px] p-3 text-left">Aktion</th>
+                    <th className="w-[13%] p-3 text-left">Datum</th>
+                    <th className="w-[28%] p-3 text-left">Beschreibung</th>
+                    <th className="w-[12%] p-3 text-left">Betrag</th>
+                    <th className="w-[16%] p-3 text-left">Soll</th>
+                    <th className="w-[16%] p-3 text-left">Haben</th>
+                    {vatEnabled ? <th className="w-[10%] p-3 text-left">MWST</th> : null}
+                    <th className="w-[5%] p-3 text-left">Aktion</th>
                   </tr>
                 </thead>
 
@@ -524,7 +527,7 @@ export default function SpreadsheetPage() {
                           <div className="rounded-lg border border-[color:var(--bp-border)] bg-white px-2 py-1">
                             <input
                               type="date"
-                              className="w-full bg-transparent outline-none"
+                              className="w-full min-w-0 bg-transparent outline-none"
                               value={r.date}
                               onChange={(e) => updateRow(r.id, { date: e.target.value })}
                             />
@@ -532,7 +535,7 @@ export default function SpreadsheetPage() {
                         </td>
 
                         <td className="p-3">
-                          <div className="rounded-lg border border-[color:var(--bp-border)] bg-white px-2 py-1 break-words">
+                          <div className="rounded-lg border border-[color:var(--bp-border)] bg-white px-2 py-1 break-words whitespace-normal">
                             {r.description}
                           </div>
                         </td>
@@ -551,7 +554,7 @@ export default function SpreadsheetPage() {
                           <td className="p-3">
                             <div className={`rounded-lg border px-2 py-1 ${vatMissing ? "border-pink-200 bg-pink-50" : "border-[color:var(--bp-border)] bg-white"}`}>
                               <input
-                                className="w-full bg-transparent outline-none"
+                                className="w-full min-w-0 bg-transparent outline-none"
                                 placeholder="z. B. VB81"
                                 value={r.vatCode}
                                 onChange={(e) => updateRow(r.id, { vatCode: e.target.value })}
@@ -560,7 +563,7 @@ export default function SpreadsheetPage() {
                           </td>
                         ) : null}
                         <td className="p-3">
-                          <div className="flex items-center gap-1 whitespace-nowrap">
+                          <div className="flex flex-wrap items-center gap-1">
                             <Button
                               variant="outline"
                               onClick={() => openRuleModal(r)}
@@ -593,8 +596,8 @@ export default function SpreadsheetPage() {
             </div>
             {submitSummary ? <div className="mt-3 text-sm font-medium text-slate-700">{submitSummary}</div> : null}
             {submitResults.length ? (
-              <div className="mt-3 overflow-auto rounded-xl border border-[color:var(--bp-border)] bg-white">
-                <table className="min-w-[700px] w-full text-sm">
+              <div className="mt-3 overflow-x-hidden overflow-y-auto rounded-xl border border-[color:var(--bp-border)] bg-white">
+                <table className="w-full table-fixed text-sm">
                   <thead className="bg-slate-50 text-slate-600">
                     <tr>
                       {["Zeile", "CSV-Zeile", "Status", "ID", "Ref", "Fehler"].map((h) => (
@@ -607,12 +610,12 @@ export default function SpreadsheetPage() {
                   <tbody>
                     {submitResults.map((r, i) => (
                       <tr key={`${r.row}-${i}`} className="border-t border-[color:var(--bp-border)]">
-                        <td className="p-2">{r.row}</td>
-                        <td className="p-2">{r.csv_row ?? ""}</td>
-                        <td className="p-2">{r.status}</td>
-                        <td className="p-2">{r.id ?? ""}</td>
-                        <td className="p-2">{r.reference_nr ?? ""}</td>
-                        <td className="p-2 text-red-600">{r.error ?? ""}</td>
+                        <td className="p-2 break-words">{r.row}</td>
+                        <td className="p-2 break-words">{r.csv_row ?? ""}</td>
+                        <td className="p-2 break-words">{r.status}</td>
+                        <td className="p-2 break-words">{r.id ?? ""}</td>
+                        <td className="p-2 break-words">{r.reference_nr ?? ""}</td>
+                        <td className="p-2 break-words text-red-600">{r.error ?? ""}</td>
                       </tr>
                     ))}
                   </tbody>

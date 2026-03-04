@@ -2,17 +2,22 @@
 
 import Link from "next/link";
 import clsx from "clsx";
-import { FileUp, Eye, Sparkles, Sheet, CheckCircle } from "lucide-react";
+import { FileUp, Eye, Sparkles, Sheet, ClipboardPaste } from "lucide-react";
 
-const steps = [
+const bankSteps = [
   { key: "Upload", icon: FileUp, href: "/upload" },
   { key: "Preview", icon: Eye, href: "/preview" },
   { key: "Bereinigung", icon: Sparkles, href: "/cleanup" },
   { key: "Tabelle", icon: Sheet, href: "/spreadsheet" },
-  { key: "Abschluss", icon: CheckCircle, href: "/complete" },
 ];
 
-export function FlowStepper({ active }: { active: string }) {
+const directSteps = [
+  { key: "Direktimport", icon: ClipboardPaste, href: "/upload?mode=direct" },
+  { key: "Tabelle", icon: Sheet, href: "/spreadsheet" },
+];
+
+export function FlowStepper({ active, variant = "bank" }: { active: string; variant?: "bank" | "direct" }) {
+  const steps = variant === "direct" ? directSteps : bankSteps;
   return (
     <div className="rounded-2xl border border-[color:var(--bp-border)] bg-white/60 p-6">
       <div className="flex items-center justify-between gap-3">
