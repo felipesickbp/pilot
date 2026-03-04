@@ -20,13 +20,13 @@ export function FlowStepper({ active, variant = "bank" }: { active: string; vari
   const steps = variant === "direct" ? directSteps : bankSteps;
   return (
     <div className="rounded-2xl border border-[color:var(--bp-border)] bg-white/60 p-6">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex w-full items-center gap-3">
         {steps.map((s, i) => {
           const isActive = s.key === active;
           const Icon = s.icon;
 
           return (
-            <div key={s.key} className="flex flex-1 items-center gap-3">
+            <div key={s.key} className="contents">
               <Link
                 href={s.href}
                 aria-current={isActive ? "page" : undefined}
@@ -41,10 +41,7 @@ export function FlowStepper({ active, variant = "bank" }: { active: string; vari
                 <Icon className="h-4 w-4" />
                 <span className="hidden sm:inline">{s.key}</span>
               </Link>
-
-              {i < steps.length - 1 && (
-                <div className="mx-2 hidden h-[2px] flex-1 bg-[color:var(--bp-border)] md:block" />
-              )}
+              {i < steps.length - 1 ? <div className="mx-2 hidden h-[2px] flex-1 bg-[color:var(--bp-border)] md:block" /> : null}
             </div>
           );
         })}
