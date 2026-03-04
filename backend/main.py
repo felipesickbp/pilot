@@ -2066,7 +2066,9 @@ def post_direct_import_to_bexio(payload: DirectImportPostRequest, request: Reque
                     vat_account = str(row.vatAccount or "").strip()
                     if vat_account:
                         tax_account_id = _resolve_account_id(vat_account, account_by_number, account_by_id)
-                        if tax_account_id:
+                        # Bexio requires tax_account_id to equal debit_account_id or credit_account_id.
+                        # If not, omit tax_account_id and let Bexio infer from the posting entry.
+                        if tax_account_id and int(tax_account_id) in (int(debit_id), int(credit_id)):
                             entry["tax_account_id"] = int(tax_account_id)
 
                 reference_nr = str(row.reference_nr or "").strip()
