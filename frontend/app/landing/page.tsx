@@ -1,6 +1,6 @@
 "use client";
 // /opt/bp-pilot/app/frontend/app/landing/page.tsx
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import "./landing.css";
 import { LogoMark } from "../components/logo-mark";
 import type { ReactNode } from "react";
@@ -42,7 +42,7 @@ const REVOLVER_CARD_HEIGHT = 132;
 const REVOLVER_GAP = 16;
 const REVOLVER_PITCH = REVOLVER_CARD_HEIGHT + REVOLVER_GAP;
 const REVOLVER_VIEWPORT_HEIGHT = 260;
-const REVOLVER_CENTER_OFFSET = Math.round((REVOLVER_VIEWPORT_HEIGHT - REVOLVER_CARD_HEIGHT) / 2);
+const REVOLVER_CENTER_OFFSET = Math.round((REVOLVER_VIEWPORT_HEIGHT - REVOLVER_CARD_HEIGHT) / 2) + 92;
 
 function Header() {
   return (
@@ -184,29 +184,24 @@ function FormatsFeature() {
   const handleWheelCapture = (event: React.WheelEvent<HTMLElement>) => {
     const section = sectionRef.current;
     if (!section) return;
-
     const delta = event.deltaY;
     if (!delta) return;
 
     const rect = section.getBoundingClientRect();
     const vh = window.innerHeight;
-    const inViewBand = rect.top < vh * 0.9 && rect.bottom > vh * 0.1;
+    const inViewBand = rect.top < vh * 0.95 && rect.bottom > vh * 0.05;
     if (!inViewBand) return;
 
     const dir = delta > 0 ? 1 : -1;
     const atFirst = active === 0;
     const atLast = active === FORMAT_ITEMS.length - 1;
     const canStep = (dir > 0 && !atLast) || (dir < 0 && !atFirst);
-
     if (!canStep) return;
 
     const now = Date.now();
-    if (now - lastStepRef.current < 220) {
-      event.preventDefault();
-      return;
-    }
-    lastStepRef.current = now;
     event.preventDefault();
+    if (now - lastStepRef.current < 200) return;
+    lastStepRef.current = now;
     setActive((prev) => Math.max(0, Math.min(FORMAT_ITEMS.length - 1, prev + dir)));
   };
 
@@ -240,7 +235,7 @@ function FormatsFeature() {
           </div>
         </div>
 
-        <div className="card feature-visual formats-visual-shell">
+        <div className="feature-visual formats-visual-shell">
           <div className="visual capability-visual formats-sticky">
             <div className="formats-revolver">
               <div
