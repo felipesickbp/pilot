@@ -1568,6 +1568,26 @@ def _build_currency_lookup(access_token: str) -> Dict[str, int]:
     return out
 
 
+def _fetch_taxes(access_token: str) -> List[Dict[str, Any]]:
+    # Try multiple known variants because endpoint/path behavior may differ
+    # between bexio API versions and tenant/app configurations.
+    attempts: List[Tuple[str, Dict[str, str]]] = [
+        (f"{BEXIO_API_V3}/accounting/taxes", _auth(access_token)),
+        (f"{BEXIO_API_V3}/taxes", _auth(access_token)),
+        (f"{BEXIO_API_V2}/taxes", _auth_v2(access_token)),
+        (f"{BEXIO_API_V2}/taxes", _auth(access_token)),
+        (f"{BEXIO_API_V2}/accounting/taxes", _auth_v2(access_token)),
+    ]
+    for url, headers in attempts:
+        try:
+            items = _fetch_json_list(url, headers)
+        except Exception:
+            items = []
+        if items:
+            return items
+    return []
+
+
 def _normalize_tax_key(raw: str) -> str:
     return re.sub(r"[^A-Z0-9]+", "", str(raw or "").strip().upper())
 
@@ -1600,10 +1620,7 @@ def _collect_tax_scalar_strings(value: Any, depth: int = 0, max_depth: int = 4) 
 
 
 def _build_tax_lookup(access_token: str) -> Tuple[Dict[str, List[int]], Dict[str, List[int]]]:
-    headers = _auth(access_token)
-    taxes = _fetch_json_list(f"{BEXIO_API_V3}/accounting/taxes", headers) or _fetch_json_list(
-        f"{BEXIO_API_V2}/taxes", headers
-    )
+    taxes = _fetch_taxes(access_token)
     exact_ids: Dict[str, set[int]] = {}
     token_ids: Dict[str, set[int]] = {}
     for t in taxes:
@@ -1699,10 +1716,7 @@ def _resolve_tax_id(
 
 
 def _list_taxes_for_suggestions(access_token: str) -> List[Dict[str, Any]]:
-    headers = _auth(access_token)
-    taxes = _fetch_json_list(f"{BEXIO_API_V3}/accounting/taxes", headers) or _fetch_json_list(
-        f"{BEXIO_API_V2}/taxes", headers
-    )
+    taxes = _fetch_taxes(access_token)
     out: List[Dict[str, Any]] = []
     for t in taxes:
         try:
