@@ -312,16 +312,6 @@ a{color:inherit;text-decoration:none}
   padding:56px 0;
   position:relative;
 }
-.feature::before{
-  content:"";
-  position:absolute;
-  left:8%;
-  right:8%;
-  top:0;
-  height:1px;
-  background:linear-gradient(90deg, transparent, rgba(37,99,235,.22), transparent);
-  opacity:.6;
-}
 .feature-inner{display:grid;gap:22px;align-items:center}
 .feature-inner.reverse .feature-copy{order:2}
 .feature-inner.reverse .feature-visual{order:1}

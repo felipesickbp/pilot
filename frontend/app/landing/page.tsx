@@ -305,7 +305,7 @@ export default function LandingPage() {
 
         <div id="product" className="container section-head">
           <h2 className="h2 center">Von Bankdaten zu buchbaren Sätzen</h2>
-          <p className="muted center">Import. Zuordnung. Kontierung. Übergabe.</p>
+          <p className="muted center">Import. Zuordnung. Kontierung.</p>
         </div>
 
         <FeatureBlock
