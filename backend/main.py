@@ -1523,12 +1523,25 @@ def _build_currency_lookup(access_token: str) -> Dict[str, int]:
     return out
 
 
-def _build_tax_lookup(access_token: str) -> Dict[str, int]:
+def _normalize_tax_key(raw: str) -> str:
+    return re.sub(r"[^A-Z0-9]+", "", str(raw or "").strip().upper())
+
+
+def _extract_tax_tokens(raw: str) -> List[str]:
+    upper = str(raw or "").strip().upper()
+    if not upper:
+        return []
+    # Codes such as ULA, BZB81, VB81 are stable token candidates.
+    return list({m.group(0) for m in re.finditer(r"[A-Z]{2,}[0-9]{0,3}", upper)})
+
+
+def _build_tax_lookup(access_token: str) -> Tuple[Dict[str, List[int]], Dict[str, List[int]]]:
     headers = _auth(access_token)
     taxes = _fetch_json_list(f"{BEXIO_API_V3}/accounting/taxes", headers) or _fetch_json_list(
         f"{BEXIO_API_V2}/taxes", headers
     )
-    out: Dict[str, int] = {}
+    exact_ids: Dict[str, set[int]] = {}
+    token_ids: Dict[str, set[int]] = {}
     for t in taxes:
         try:
             tid = int(t.get("id"))
@@ -1537,7 +1550,85 @@ def _build_tax_lookup(access_token: str) -> Dict[str, int]:
         for key in ("code", "name", "title", "text"):
             raw = str(t.get(key) or "").strip().upper()
             if raw:
-                out[raw] = tid
+                exact_ids.setdefault(raw, set()).add(tid)
+                normalized = _normalize_tax_key(raw)
+                if normalized:
+                    exact_ids.setdefault(normalized, set()).add(tid)
+                for token in _extract_tax_tokens(raw):
+                    token_ids.setdefault(token, set()).add(tid)
+    return (
+        {k: sorted(v) for k, v in exact_ids.items()},
+        {k: sorted(v) for k, v in token_ids.items()},
+    )
+
+
+def _tax_env_var_for_code(vat_code: str) -> str:
+    safe = re.sub(r"[^A-Z0-9]+", "_", str(vat_code or "").strip().upper()).strip("_")
+    return f"BEXIO_TAX_ID_{safe}" if safe else "BEXIO_TAX_ID_"
+
+
+def _resolve_tax_id(
+    vat_code: str,
+    exact_lookup: Dict[str, List[int]],
+    token_lookup: Dict[str, List[int]],
+) -> Tuple[Optional[int], Optional[str]]:
+    raw = str(vat_code or "").strip().upper()
+    if not raw:
+        return None, None
+
+    normalized = _normalize_tax_key(raw)
+    for key in (raw, normalized):
+        matches = exact_lookup.get(key) or []
+        if len(matches) == 1:
+            return int(matches[0]), None
+        if len(matches) > 1:
+            return None, (
+                f"VAT code '{raw}' is ambiguous in tenant taxes for exact match "
+                f"(matches IDs: {', '.join(str(i) for i in matches)})."
+            )
+
+    token_matches = token_lookup.get(raw) or token_lookup.get(normalized) or []
+    if len(token_matches) == 1:
+        return int(token_matches[0]), None
+    if len(token_matches) > 1:
+        return None, (
+            f"VAT code '{raw}' is ambiguous in tenant taxes for token match "
+            f"(matches IDs: {', '.join(str(i) for i in token_matches)})."
+        )
+
+    # Fallback-only override. Tenant lookup is always preferred.
+    env_var = _tax_env_var_for_code(raw)
+    env_raw = str(os.getenv(env_var, "")).strip()
+    if env_raw:
+        try:
+            return int(env_raw), None
+        except Exception:
+            return None, f"{env_var} is set but not a valid integer."
+    return None, None
+
+
+def _list_taxes_for_suggestions(access_token: str) -> List[Dict[str, Any]]:
+    headers = _auth(access_token)
+    taxes = _fetch_json_list(f"{BEXIO_API_V3}/accounting/taxes", headers) or _fetch_json_list(
+        f"{BEXIO_API_V2}/taxes", headers
+    )
+    out: List[Dict[str, Any]] = []
+    for t in taxes:
+        try:
+            tid = int(t.get("id"))
+        except Exception:
+            continue
+        out.append(
+            {
+                "id": tid,
+                "code": str(t.get("code") or "").strip(),
+                "name": str(t.get("name") or t.get("title") or "").strip(),
+                "text": str(t.get("text") or "").strip(),
+                "percentage": t.get("percentage"),
+                "is_active": t.get("is_active"),
+            }
+        )
+    out.sort(key=lambda x: (str(x.get("code") or ""), str(x.get("name") or ""), int(x.get("id") or 0)))
     return out
 
 
@@ -1672,6 +1763,51 @@ def bexio_accounts(request: Request) -> Dict[str, Any]:
     return {"tenant_id": tenant_id, "tenant_name": tenant_name, "items": items}
 
 
+@app.get("/bexio/taxes")
+def bexio_taxes(request: Request, q: str = Query(default="")) -> Dict[str, Any]:
+    sid, sess = _get_bexio_session_or_401(request)
+    access_token = _get_valid_access_token(sid, sess)
+    tenant_id, tenant_name, _has_vat = _ensure_tenant_context(sid, sess)
+
+    cache = sess.get("taxes_cache")
+    now_ts = int(time.time())
+    items: List[Dict[str, Any]]
+    if isinstance(cache, dict):
+        cached_tenant = str(cache.get("tenant_id") or "")
+        cached_until = int(cache.get("expires_at") or 0)
+        cached_items = cache.get("items")
+        if cached_tenant == tenant_id and cached_until > now_ts and isinstance(cached_items, list):
+            items = cached_items
+        else:
+            items = _list_taxes_for_suggestions(access_token)
+    else:
+        items = _list_taxes_for_suggestions(access_token)
+
+    sess["taxes_cache"] = {
+        "tenant_id": tenant_id,
+        "expires_at": now_ts + 1800,
+        "items": items,
+    }
+    _bexio_sessions[sid] = sess
+
+    search = str(q or "").strip().upper()
+    if search:
+        filtered = []
+        for item in items:
+            haystack = " ".join(
+                [
+                    str(item.get("code") or ""),
+                    str(item.get("name") or ""),
+                    str(item.get("text") or ""),
+                ]
+            ).upper()
+            if search in haystack:
+                filtered.append(item)
+        items = filtered
+
+    return {"tenant_id": tenant_id, "tenant_name": tenant_name, "items": items}
+
+
 @app.get("/posting-rules")
 def get_posting_rules(request: Request) -> Dict[str, Any]:
     tenant_id, tenant_name = _history_tenant_context_or_401(request)
@@ -1756,7 +1892,7 @@ def post_direct_import_to_bexio(payload: DirectImportPostRequest, request: Reque
     access_token = _get_valid_access_token(sid, sess)
     account_by_number, account_by_id = _build_account_lookup(access_token)
     currency_lookup = _build_currency_lookup(access_token)
-    tax_lookup = _build_tax_lookup(access_token)
+    tax_lookup, tax_tokens = _build_tax_lookup(access_token)
 
     next_ref_nr_url = f"{BEXIO_API_V3}/accounting/manual_entries/next_ref_nr"
     manual_entries_url = f"{BEXIO_API_V3}/accounting/manual_entries"
@@ -1802,9 +1938,15 @@ def post_direct_import_to_bexio(payload: DirectImportPostRequest, request: Reque
                 tax_id = None
                 vat_code = str(row.vatCode or "").strip().upper()
                 if vat_code:
-                    tax_id = tax_lookup.get(vat_code)
+                    tax_id, tax_error = _resolve_tax_id(vat_code, tax_lookup, tax_tokens)
+                    if tax_error:
+                        raise ValueError(f"{tax_error} (row {row_no})")
                     if not tax_id:
-                        raise ValueError(f"VAT code '{vat_code}' not mapped in row {row_no}.")
+                        env_var = _tax_env_var_for_code(vat_code)
+                        raise ValueError(
+                            f"VAT code '{vat_code}' not mapped in row {row_no}. "
+                            f"Check /bexio/taxes or set {env_var} in the backend environment."
+                        )
 
                 entry: Dict[str, Any] = {
                     "debit_account_id": int(debit_id),
