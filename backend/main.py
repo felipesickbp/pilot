@@ -1436,13 +1436,46 @@ def _parse_date_to_iso_strict(raw: str) -> str:
 
 
 def _extract_list_from_payload(payload: Any) -> List[Dict[str, Any]]:
+    def _is_dict_list(v: Any) -> bool:
+        return isinstance(v, list) and any(isinstance(x, dict) for x in v)
+
+    def _dict_list(v: Any) -> List[Dict[str, Any]]:
+        if not isinstance(v, list):
+            return []
+        return [x for x in v if isinstance(x, dict)]
+
     if isinstance(payload, list):
-        return [x for x in payload if isinstance(x, dict)]
+        return _dict_list(payload)
     if isinstance(payload, dict):
         for key in ("items", "data", "results", "result", "value", "taxes", "accounts", "currencies"):
             val = payload.get(key)
-            if isinstance(val, list):
-                return [x for x in val if isinstance(x, dict)]
+            if _is_dict_list(val):
+                return _dict_list(val)
+
+        # Fallback: recursively search nested payload for any list of dicts.
+        # Some endpoints wrap entities in non-standard keys.
+        best: List[Dict[str, Any]] = []
+
+        def _walk(obj: Any, depth: int = 0, max_depth: int = 6) -> None:
+            nonlocal best
+            if depth > max_depth:
+                return
+            if isinstance(obj, dict):
+                for vv in obj.values():
+                    if _is_dict_list(vv):
+                        cand = _dict_list(vv)
+                        if len(cand) > len(best):
+                            best = cand
+                    elif isinstance(vv, (dict, list)):
+                        _walk(vv, depth + 1, max_depth)
+            elif isinstance(obj, list):
+                for item in obj:
+                    if isinstance(item, (dict, list)):
+                        _walk(item, depth + 1, max_depth)
+
+        _walk(payload)
+        if best:
+            return best
     return []
 
 
