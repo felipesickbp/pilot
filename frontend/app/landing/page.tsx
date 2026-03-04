@@ -1,5 +1,7 @@
+"use client";
 // /opt/bp-pilot/app/frontend/app/landing/page.tsx
 import "./landing.css";
+import { useEffect } from "react";
 
 type Bullet = { title: string; text: string };
 
@@ -112,7 +114,7 @@ function Hero() {
             </a>
           </div>
 
-          <div className="device">
+          <div className="device fx-depth" data-speed="0.12">
             <div className="device-grid">
               {[
                 { label: "1. Upload", src: PREVIEWS.upload, alt: "Upload Preview" },
@@ -203,7 +205,7 @@ function FeatureBlock(props: {
           </div>
         </div>
 
-        <div className="card feature-visual">
+        <div className="card feature-visual fx-depth" data-speed={reverse ? "0.08" : "0.14"}>
           <div
             className="visual"
             style={{
@@ -304,6 +306,24 @@ function Footer() {
 }
 
 export default function LandingPage() {
+  useEffect(() => {
+    // Reversible scroll FX: remove this block (and .fx-depth styles) to disable.
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = window.requestAnimationFrame(() => {
+        document.documentElement.style.setProperty("--scroll-y", String(window.scrollY || 0));
+        raf = 0;
+      });
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (raf) window.cancelAnimationFrame(raf);
+    };
+  }, []);
+
   return (
     <div className="page">
       <Header />

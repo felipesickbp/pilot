@@ -166,8 +166,13 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-6">
-      <Card className="w-full max-w-md">
+    <div className="login-scene min-h-screen bg-slate-50 flex items-center justify-center px-6">
+      <div className="login-ambient" aria-hidden="true">
+        <div className="login-glow login-glow-a" />
+        <div className="login-glow login-glow-b" />
+        <div className="login-grid" />
+      </div>
+      <Card className="relative z-10 w-full max-w-md">
         <CardHeader>
           <div className="text-sm font-semibold">BP Pilot</div>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight">
@@ -250,6 +255,71 @@ export default function LoginPage() {
           )}
         </CardContent>
       </Card>
+      <style jsx>{`
+        .login-scene {
+          position: relative;
+          overflow: hidden;
+          background:
+            radial-gradient(900px 600px at -10% -20%, rgba(59, 130, 246, 0.14), transparent 60%),
+            radial-gradient(800px 580px at 110% 120%, rgba(236, 72, 153, 0.12), transparent 60%),
+            #f8fafc;
+        }
+        .login-ambient {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+        }
+        .login-glow {
+          position: absolute;
+          border-radius: 999px;
+          filter: blur(48px);
+          opacity: 0.45;
+          animation: drift 24s ease-in-out infinite alternate;
+        }
+        .login-glow-a {
+          width: 48vw;
+          height: 48vw;
+          max-width: 580px;
+          max-height: 580px;
+          background: rgba(37, 99, 235, 0.28);
+          top: -12%;
+          left: -10%;
+        }
+        .login-glow-b {
+          width: 44vw;
+          height: 44vw;
+          max-width: 500px;
+          max-height: 500px;
+          background: rgba(16, 185, 129, 0.2);
+          right: -8%;
+          bottom: -18%;
+          animation-duration: 30s;
+        }
+        .login-grid {
+          position: absolute;
+          inset: 0;
+          background-image:
+            linear-gradient(to right, rgba(15, 23, 42, 0.055) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(15, 23, 42, 0.055) 1px, transparent 1px);
+          background-size: 40px 40px;
+          mask-image: radial-gradient(circle at center, rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.08) 70%);
+          animation: gridFloat 22s linear infinite;
+        }
+        @keyframes drift {
+          0% { transform: translate3d(0, 0, 0) scale(1); }
+          100% { transform: translate3d(3%, -4%, 0) scale(1.08); }
+        }
+        @keyframes gridFloat {
+          0% { transform: translate3d(0, 0, 0); }
+          100% { transform: translate3d(0, -40px, 0); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .login-glow,
+          .login-grid {
+            animation: none !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
