@@ -4,6 +4,7 @@ import Link from "next/link";
 import clsx from "clsx";
 import React, { useEffect, useMemo, useState } from "react";
 import { Settings } from "lucide-react";
+import { LogoMark } from "./logo-mark";
 
 const nav = [
   { href: "/dashboard", label: "Dashboard" },
@@ -25,9 +26,7 @@ export function AppShell({
       <header className="border-b border-[color:var(--bp-border)] bg-white/70 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-fuchsia-500 to-blue-500 text-white">
-              <span className="text-sm font-bold">BP</span>
-            </div>
+            <LogoMark size={40} />
             <div>
               <div className="text-sm font-semibold">bp-pilot</div>
               <div className="text-xs text-slate-500">Kontierung & bexio Workflow</div>

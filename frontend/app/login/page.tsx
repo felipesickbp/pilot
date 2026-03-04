@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, Button, Input, Subhead } from "../components/ui";
+import { LogoMark } from "../components/logo-mark";
 
 type AuthSession = {
   authenticated: boolean;
@@ -174,7 +175,10 @@ export default function LoginPage() {
       </div>
       <Card className="relative z-10 w-full max-w-md">
         <CardHeader>
-          <div className="text-sm font-semibold">BP Pilot</div>
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <LogoMark size={22} />
+            <span>bp-pilot</span>
+          </div>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight">
             {step === "verify"
               ? mode === "reset"

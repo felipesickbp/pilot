@@ -1,6 +1,7 @@
 "use client";
 // /opt/bp-pilot/app/frontend/app/landing/page.tsx
 import "./landing.css";
+import { LogoMark } from "../components/logo-mark";
 
 type Bullet = { title: string; text: string };
 
@@ -15,7 +16,9 @@ function Header() {
     <header className="topbar">
       <div className="container topbar-inner">
         <a className="brand" href="#top" aria-label="bp-pilot home">
-          <span className="brand-mark">BP</span>
+          <span className="brand-mark">
+            <LogoMark size={36} />
+          </span>
           <span className="brand-text">
             <span className="brand-name">bp-pilot</span>
             <span className="brand-sub">Kontierung mit KI-Unterstützung</span>
@@ -141,13 +144,7 @@ function Hero() {
 }
 
 function LogoRow() {
-  return (
-    <section className="logos">
-      <div className="container">
-        <p className="muted center">Direkte bexio-Integration für strukturierte Kontierungs-Workflows.</p>
-      </div>
-    </section>
-  );
+  return null;
 }
 
 function FeatureBlock(props: {
@@ -221,9 +218,9 @@ function CtaBand() {
   return (
     <section className="cta">
       <div className="container cta-inner">
-        <div>
-          <h3 className="h2 invert">Alles im Blick – jederzeit.</h3>
-          <p className="muted invert">Von unstrukturierten Bankdaten zu einer klaren, buchbaren Tabelle.</p>
+        <div className="cta-copy">
+          <h3 className="h2">Alles im Blick – jederzeit.</h3>
+          <p>Von unstrukturierten Bankdaten zu einer klaren, buchbaren Tabelle.</p>
           <div className="cta-actions">
             <a className="btn btn-primary" href="https://app.bp-pilot.ch/upload">
               Kostenlos starten
@@ -250,7 +247,9 @@ function Footer() {
       <div className="container footer-inner">
         <div>
           <div className="footer-brand">
-            <span className="brand-mark">BP</span>
+            <span className="brand-mark">
+              <LogoMark size={32} />
+            </span>
             <strong>bp-pilot</strong>
           </div>
           <p className="muted">Assistiert bei der aufwändigen Kontierung und verbindet den Workflow direkt mit bexio.</p>
@@ -268,7 +267,7 @@ function Footer() {
 
         <div>
           <div className="footer-head">Use Cases</div>
-          <a className="footer-link" href="#solutions">
+          <a className="footer-link" href="https://burkhart-partners.ch/" target="_blank" rel="noreferrer">
             Treuhand
           </a>
           <a className="footer-link" href="#solutions">
