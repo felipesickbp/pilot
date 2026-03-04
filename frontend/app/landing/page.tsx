@@ -1,15 +1,48 @@
 "use client";
 // /opt/bp-pilot/app/frontend/app/landing/page.tsx
+import { useEffect, useRef, useState } from "react";
 import "./landing.css";
 import { LogoMark } from "../components/logo-mark";
+import type { ReactNode } from "react";
+import { Badge } from "../components/ui";
+import { FileSpreadsheet, FileText, Landmark } from "lucide-react";
 
 type Bullet = { title: string; text: string };
+type FormatItem = { icon: ReactNode; title: string; desc: string };
 
 const PREVIEWS = {
   upload: "/landing/step-upload.png",
   preview: "/landing/step-preview.png",
   spreadsheet: "/landing/step-spreadsheet.png",
 };
+
+const FORMAT_ITEMS: FormatItem[] = [
+  {
+    icon: <FileText className="h-5 w-5" />,
+    title: "CSV Files",
+    desc: "Verarbeitet Metazeilen, verschobene Header und Exporte ohne Kopfzeile.",
+  },
+  {
+    icon: <FileSpreadsheet className="h-5 w-5" />,
+    title: "Excel-Dateien",
+    desc: "Liest Arbeitsblätter und schlägt mehrere mögliche Header-Zeilen vor.",
+  },
+  {
+    icon: <Landmark className="h-5 w-5" />,
+    title: "CAMT.053",
+    desc: "CAMT-XML wird weiterhin unterstützt.",
+  },
+  {
+    icon: <FileText className="h-5 w-5" />,
+    title: "Bereinigungsfreundlich",
+    desc: "Textbereinigung erfolgt bewusst erst im Schritt Bereinigung.",
+  },
+];
+const REVOLVER_CARD_HEIGHT = 132;
+const REVOLVER_GAP = 16;
+const REVOLVER_PITCH = REVOLVER_CARD_HEIGHT + REVOLVER_GAP;
+const REVOLVER_VIEWPORT_HEIGHT = 260;
+const REVOLVER_CENTER_OFFSET = Math.round((REVOLVER_VIEWPORT_HEIGHT - REVOLVER_CARD_HEIGHT) / 2);
 
 function Header() {
   return (
@@ -92,9 +125,7 @@ function Hero() {
             <span className="h1-accent">Saubere Buchungen direkt in bexio.</span>
           </h1>
 
-          <p className="lead">
-            bp-pilot verbindet Import, Mapping und Buchungsregeln in einem klaren Workflow.
-          </p>
+          <p className="lead">Import, Zuordnung und Buchungsregeln in einem klaren Ablauf.</p>
 
           <div className="hero-kpi-row">
             <div className="hero-kpi"><strong>Weniger Klicks</strong><span>pro Buchung</span></div>
@@ -110,33 +141,6 @@ function Hero() {
               Produkt entdecken
             </a>
           </div>
-
-          <div className="device">
-            <div className="device-grid">
-              {[
-                { label: "1. Upload", src: PREVIEWS.upload, alt: "Upload Preview" },
-                { label: "2. Preview", src: PREVIEWS.preview, alt: "Preview Preview" },
-                { label: "3. Spreadsheet", src: PREVIEWS.spreadsheet, alt: "Spreadsheet Preview" },
-              ].map((x) => (
-                <div key={x.label} className="device-card">
-                  <div className="device-label">{x.label}</div>
-                  <div
-                    className="device-blank"
-                    style={{
-                      padding: 10,
-                      height: 170, // feel free to tweak
-                    }}
-                  >
-                    <Shot src={x.src} alt={x.alt} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div style={{ marginTop: 10 }} className="muted center">
-            *Previews aus dem Live-Produkt (app.bp-pilot.ch)
-          </div>
         </div>
       </div>
     </section>
@@ -147,6 +151,121 @@ function LogoRow() {
   return null;
 }
 
+function FormatRow({
+  icon,
+  title,
+  desc,
+}: {
+  icon: ReactNode;
+  title: string;
+  desc: string;
+}) {
+  return (
+    <div className="format-row rounded-2xl border border-[color:var(--bp-border)] bg-white p-4 ring-1 ring-fuchsia-200">
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 text-slate-400">{icon}</div>
+        <div>
+          <div className="flex items-center gap-2">
+            <div className="text-sm font-semibold">{title}</div>
+            <Badge variant="blue">Enabled</Badge>
+          </div>
+          <div className="text-sm text-slate-500">{desc}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FormatsFeature() {
+  const [active, setActive] = useState(0);
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const lastStepRef = useRef(0);
+
+  const handleWheelCapture = (event: React.WheelEvent<HTMLElement>) => {
+    const section = sectionRef.current;
+    if (!section) return;
+
+    const delta = event.deltaY;
+    if (!delta) return;
+
+    const rect = section.getBoundingClientRect();
+    const vh = window.innerHeight;
+    const inViewBand = rect.top < vh * 0.9 && rect.bottom > vh * 0.1;
+    if (!inViewBand) return;
+
+    const dir = delta > 0 ? 1 : -1;
+    const atFirst = active === 0;
+    const atLast = active === FORMAT_ITEMS.length - 1;
+    const canStep = (dir > 0 && !atLast) || (dir < 0 && !atFirst);
+
+    if (!canStep) return;
+
+    const now = Date.now();
+    if (now - lastStepRef.current < 220) {
+      event.preventDefault();
+      return;
+    }
+    lastStepRef.current = now;
+    event.preventDefault();
+    setActive((prev) => Math.max(0, Math.min(FORMAT_ITEMS.length - 1, prev + dir)));
+  };
+
+  return (
+    <section className="feature formats-feature" id="upload" ref={sectionRef} onWheelCapture={handleWheelCapture}>
+      <div className="container feature-inner formats-feature-inner">
+        <div className="feature-copy">
+          <div className="kicker">UPLOAD</div>
+          <h3 className="h2">Alle gängigen Formate direkt einlesen</h3>
+          <p className="muted">CSV, Excel oder CAMT: bp-pilot startet ohne starre Templates.</p>
+          <div className="bullets">
+            <div className="bullet">
+              <div className="bullet-icon" aria-hidden="true" />
+              <div>
+                <div className="bullet-title">Weniger Vorarbeit</div>
+                <div className="muted">Auch uneinheitliche Exporte sind direkt nutzbar.</div>
+              </div>
+            </div>
+            <div className="bullet">
+              <div className="bullet-icon" aria-hidden="true" />
+              <div>
+                <div className="bullet-title">Schneller zum Mapping</div>
+                <div className="muted">Erkannte Formate landen direkt im passenden Schritt.</div>
+              </div>
+            </div>
+          </div>
+          <div className="feature-actions">
+            <a className="btn btn-primary" href="https://app.bp-pilot.ch/upload">
+              Kostenlos starten
+            </a>
+          </div>
+        </div>
+
+        <div className="card feature-visual formats-visual-shell">
+          <div className="visual capability-visual formats-sticky">
+            <div className="formats-revolver">
+              <div
+                className="formats-track"
+                style={{ transform: `translateY(${REVOLVER_CENTER_OFFSET - active * REVOLVER_PITCH}px)` }}
+                aria-live="polite"
+              >
+                {FORMAT_ITEMS.map((item, idx) => {
+                  const distance = Math.abs(idx - active);
+                  const tone = distance === 0 ? "is-active" : distance === 1 ? "is-near" : "is-far";
+                  return (
+                    <div key={item.title} className={`formats-slide ${tone}`}>
+                    <FormatRow icon={item.icon} title={item.title} desc={item.desc} />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function FeatureBlock(props: {
   kicker: string;
   title: string;
@@ -155,10 +274,9 @@ function FeatureBlock(props: {
   primary?: { label: string; href: string };
   secondary?: { label: string; href: string };
   reverse?: boolean;
-  imageSrc?: string;
-  imageAlt?: string;
+  visual?: ReactNode;
 }) {
-  const { kicker, title, description, bullets, primary, secondary, reverse, imageSrc, imageAlt } = props;
+  const { kicker, title, description, bullets, primary, secondary, reverse, visual } = props;
 
   return (
     <section className="feature" id={kicker.toLowerCase()}>
@@ -195,19 +313,7 @@ function FeatureBlock(props: {
         </div>
 
         <div className="card feature-visual">
-          <div
-            className="visual"
-            style={{
-              padding: 12,
-              height: 340, // feel free to tweak
-            }}
-          >
-            {imageSrc ? (
-              <Shot src={imageSrc} alt={imageAlt || `${kicker} Preview`} />
-            ) : (
-              <div style={{ width: "100%", height: "100%" }} />
-            )}
-          </div>
+          <div className="visual capability-visual">{visual || <div style={{ width: "100%", height: "100%" }} />}</div>
         </div>
       </div>
     </section>
@@ -308,44 +414,31 @@ export default function LandingPage() {
           <p className="muted center">Import. Zuordnung. Kontierung.</p>
         </div>
 
-        <FeatureBlock
-          kicker="UPLOAD"
-          title="Dateien hochladen und strukturiert starten"
-          description="Bankdaten importieren und sofort mit strukturierten Zeilen arbeiten. CSV, XLSX oder CAMT einlesen und sauber strukturieren."
-          bullets={[
-            { title: "Bank-unabhängig", text: "Variierende Spalten werden robust erkannt." },
-            { title: "Mandantenkontext", text: "Verarbeitung im verbundenen bexio-Mandanten." },
-          ]}
-          primary={{ label: "Kostenlos starten", href: "https://app.bp-pilot.ch/upload" }}
-          imageSrc={PREVIEWS.upload}
-          imageAlt="Upload Wizard Screenshot"
-        />
+        <FormatsFeature />
 
         <FeatureBlock
           kicker="PREVIEW"
           title="Transaktionen prüfen und bereinigen"
-          description="Buchungstexte normalisieren und Kontierungsqualität sichern. Buchungsregeln einmal definieren und wiederkehrend anwenden."
+          description="Buchungstexte normalisieren und Qualität sichern. Regeln einmal definieren und wiederverwenden."
           bullets={[
-            { title: "Klare Betragslogik", text: "Soll/Haben-ready für den Import." },
-            { title: "Cleanup-Regeln", text: "Wiederkehrende Muster automatisch entfernen." },
+            { title: "TLV/TSV Reihenfolge", text: "Direktimport mit Datum, Text, Betrag, Währung, FX, Soll, Haben, MWST-Code, MWST-Konto." },
+            { title: "Tenant-spezifische MWST", text: "MWST-Codes werden je bexio-Mandant aufgelöst (nicht global hartcodiert)." },
           ]}
           primary={{ label: "Kostenlos starten", href: "https://app.bp-pilot.ch/upload" }}
           reverse
-          imageSrc={PREVIEWS.preview}
-          imageAlt="Preview & Mapping Screenshot"
+          visual={<Shot src={PREVIEWS.preview} alt="Preview & Mapping Screenshot" />}
         />
 
         <FeatureBlock
           kicker="SPREADSHEET"
           title="Buchungsregeln anwenden und kontieren"
-          description="Konten zuordnen und Buchungen regelbasiert beschleunigen. Kontierte Zeilen direkt in den bexio-Mandanten übergeben."
+          description="Konten zuordnen und Buchungen regelbasiert beschleunigen. Kontierte Zeilen direkt nach bexio übergeben."
           bullets={[
-            { title: "Schnellere Kontierung", text: "Kontonummer oder Name suchen und übernehmen." },
-            { title: "Weniger Handarbeit", text: "Soll/Haben per Regel vorbefüllen." },
+            { title: "Regelvorschau", text: "Treffer und Nicht-Treffer werden vor dem Export transparent dargestellt." },
+            { title: "Direktimport", text: "TLV direkt einfügen, prüfen und ohne Medienbruch in die Tabelle übernehmen." },
           ]}
           primary={{ label: "Kostenlos starten", href: "https://app.bp-pilot.ch/upload" }}
-          imageSrc={PREVIEWS.spreadsheet}
-          imageAlt="Spreadsheet Screenshot"
+          visual={<Shot src={PREVIEWS.spreadsheet} alt="Spreadsheet Screenshot" />}
         />
 
         <CtaBand />
