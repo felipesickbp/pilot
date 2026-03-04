@@ -29,8 +29,8 @@ export function AppShell({
               <span className="text-sm font-bold">BP</span>
             </div>
             <div>
-              <div className="text-sm font-semibold">Pilot</div>
-              <div className="text-xs text-slate-500">Intelligent Accounting Workflow</div>
+              <div className="text-sm font-semibold">bp-pilot</div>
+              <div className="text-xs text-slate-500">Kontierung & bexio Workflow</div>
             </div>
           </div>
 

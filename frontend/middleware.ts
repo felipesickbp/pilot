@@ -21,7 +21,7 @@ const APP_PATHS = [
   "/settings",
 ];
 
-const APP_PUBLIC_PATHS = new Set(["/login", "/terms"]);
+const APP_PUBLIC_PATHS = new Set(["/login", "/terms", "/nutzungsbedingungen", "/datenschutz", "/impressum"]);
 
 export function middleware(req: NextRequest) {
   const host = (req.headers.get("host") || "").split(":")[0];

@@ -1,7 +1,6 @@
 "use client";
 // /opt/bp-pilot/app/frontend/app/landing/page.tsx
 import "./landing.css";
-import { useEffect } from "react";
 
 type Bullet = { title: string; text: string };
 
@@ -15,25 +14,13 @@ function Header() {
   return (
     <header className="topbar">
       <div className="container topbar-inner">
-        <a className="brand" href="#top" aria-label="Pilot home">
+        <a className="brand" href="#top" aria-label="bp-pilot home">
           <span className="brand-mark">BP</span>
           <span className="brand-text">
-            <span className="brand-name">Pilot</span>
-            <span className="brand-sub">Intelligent Finance Workflow</span>
+            <span className="brand-name">bp-pilot</span>
+            <span className="brand-sub">Kontierung mit KI-Unterstützung</span>
           </span>
         </a>
-
-        <nav className="nav">
-          <a href="#product" className="navlink">
-            Produkt
-          </a>
-          <a href="#solutions" className="navlink">
-            Lösungen
-          </a>
-          <a href="#resources" className="navlink">
-            Ressourcen
-          </a>
-        </nav>
 
         <div className="topbar-cta">
           <a className="btn btn-outline" href="https://app.bp-pilot.ch/login">
@@ -86,24 +73,31 @@ function Hero() {
     <section className="hero" id="top">
       <div className="hero-bg" aria-hidden="true" />
       <div className="hero-lines" aria-hidden="true" />
+      <div className="hero-orbit hero-orbit-a" aria-hidden="true" />
+      <div className="hero-orbit hero-orbit-b" aria-hidden="true" />
 
       <div className="container hero-inner">
         <div className="hero-center">
           <span className="badge">
-            <strong>4.8 Rating</strong>
+            <strong>4.8 Bewertungen</strong>
             <span className="dot" />
             <span>für moderne Buchhaltungs-Teams</span>
           </span>
 
           <h1 className="h1">
-            Bankauszüge intelligent verarbeiten.
-            <span className="h1-accent">Buchhaltung schneller abschliessen.</span>
+            Schnellere Kontierung.
+            <span className="h1-accent">Saubere Buchungen direkt in bexio.</span>
           </h1>
 
           <p className="lead">
-            Pilot verbindet Import, Bereinigung, Buchungsregeln und Kontierung in einem Ablauf. Weniger manuelle
-            Klicks, weniger Fehler, mehr Tempo für Treuhand und Finance-Teams.
+            bp-pilot verbindet Import, Mapping und Buchungsregeln in einem klaren Workflow.
           </p>
+
+          <div className="hero-kpi-row">
+            <div className="hero-kpi"><strong>Weniger Klicks</strong><span>pro Buchung</span></div>
+            <div className="hero-kpi"><strong>Mehr Konsistenz</strong><span>dank Regeln</span></div>
+            <div className="hero-kpi"><strong>Direkt in bexio</strong><span>ohne Umwege</span></div>
+          </div>
 
           <div className="hero-actions">
             <a className="btn btn-primary" href="https://app.bp-pilot.ch/upload">
@@ -114,7 +108,7 @@ function Hero() {
             </a>
           </div>
 
-          <div className="device fx-depth" data-speed="0.12">
+          <div className="device">
             <div className="device-grid">
               {[
                 { label: "1. Upload", src: PREVIEWS.upload, alt: "Upload Preview" },
@@ -150,9 +144,7 @@ function LogoRow() {
   return (
     <section className="logos">
       <div className="container">
-        <p className="muted center">
-          Für Schweizer Treuhand und Buchhaltungs-Teams: strukturierte Transaktionsdaten statt Copy-Paste-Chaos.
-        </p>
+        <p className="muted center">Direkte bexio-Integration für strukturierte Kontierungs-Workflows.</p>
       </div>
     </section>
   );
@@ -205,7 +197,7 @@ function FeatureBlock(props: {
           </div>
         </div>
 
-        <div className="card feature-visual fx-depth" data-speed={reverse ? "0.08" : "0.14"}>
+        <div className="card feature-visual">
           <div
             className="visual"
             style={{
@@ -231,12 +223,10 @@ function CtaBand() {
       <div className="container cta-inner">
         <div>
           <h3 className="h2 invert">Alles im Blick – jederzeit.</h3>
-          <p className="muted invert">
-            Von unstrukturierten Bankdaten zu einer klaren, buchbaren Tabelle mit wiederverwendbaren Buchungsregeln.
-          </p>
+          <p className="muted invert">Von unstrukturierten Bankdaten zu einer klaren, buchbaren Tabelle.</p>
           <div className="cta-actions">
             <a className="btn btn-primary" href="https://app.bp-pilot.ch/upload">
-              Upload starten
+              Kostenlos starten
             </a>
             <a className="btn btn-outline" href="https://app.bp-pilot.ch/login">
               Login
@@ -261,9 +251,9 @@ function Footer() {
         <div>
           <div className="footer-brand">
             <span className="brand-mark">BP</span>
-            <strong>Pilot</strong>
+            <strong>bp-pilot</strong>
           </div>
-          <p className="muted">Intelligente Bankdaten-Verarbeitung für schnellere Buchhaltungsprozesse.</p>
+          <p className="muted">Assistiert bei der aufwändigen Kontierung und verbindet den Workflow direkt mit bexio.</p>
         </div>
 
         <div>
@@ -277,53 +267,35 @@ function Footer() {
         </div>
 
         <div>
-          <div className="footer-head">Ressourcen</div>
-          <a className="footer-link" href="#resources">
-            Docs
+          <div className="footer-head">Use Cases</div>
+          <a className="footer-link" href="#solutions">
+            Treuhand
           </a>
-          <a className="footer-link" href="#resources">
-            Changelog
+          <a className="footer-link" href="#solutions">
+            KMU Finance
           </a>
         </div>
 
         <div>
           <div className="footer-head">Rechtliches</div>
-          <a className="footer-link" href="/terms">
-            Terms & Agreements
+          <a className="footer-link" href="/nutzungsbedingungen">
+            Nutzungsbedingungen
           </a>
-          <a className="footer-link" href="#">
+          <a className="footer-link" href="/impressum">
             Impressum
           </a>
-          <a className="footer-link" href="#">
+          <a className="footer-link" href="/datenschutz">
             Datenschutz
           </a>
         </div>
       </div>
 
-      <div className="footer-bottom">© {new Date().getFullYear()} Pilot. All rights reserved.</div>
+      <div className="footer-bottom">© {new Date().getFullYear()} bp-pilot. All rights reserved.</div>
     </footer>
   );
 }
 
 export default function LandingPage() {
-  useEffect(() => {
-    // Reversible scroll FX: remove this block (and .fx-depth styles) to disable.
-    let raf = 0;
-    const onScroll = () => {
-      if (raf) return;
-      raf = window.requestAnimationFrame(() => {
-        document.documentElement.style.setProperty("--scroll-y", String(window.scrollY || 0));
-        raf = 0;
-      });
-    };
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      window.removeEventListener("scroll", onScroll);
-      if (raf) window.cancelAnimationFrame(raf);
-    };
-  }, []);
-
   return (
     <div className="page">
       <Header />
@@ -333,20 +305,19 @@ export default function LandingPage() {
         <LogoRow />
 
         <div id="product" className="container section-head">
-          <h2 className="h2 center">Schweizer Präzision für moderne Finance-Teams</h2>
-          <p className="muted center">Minimaler Aufwand, maximale Übersicht. Vom Beleg zur Tabelle in Minuten.</p>
+          <h2 className="h2 center">Von Bankdaten zu buchbaren Sätzen</h2>
+          <p className="muted center">Import. Zuordnung. Kontierung. Übergabe.</p>
         </div>
 
         <FeatureBlock
           kicker="UPLOAD"
           title="Dateien hochladen und strukturiert starten"
-          description="CSV, XLSX oder CAMT importieren und direkt mit einer robusten Datengrundlage weiterarbeiten."
+          description="Bankdaten importieren und sofort mit strukturierten Zeilen arbeiten. CSV, XLSX oder CAMT einlesen und sauber strukturieren."
           bullets={[
-            { title: "Bank-unabhängig", text: "Variierende Spalten und Bezeichnungen werden zuverlässig erkannt." },
-            { title: "Mandantenkontext", text: "Verarbeitung direkt im verbundenen Bexio-Mandanten." },
+            { title: "Bank-unabhängig", text: "Variierende Spalten werden robust erkannt." },
+            { title: "Mandantenkontext", text: "Verarbeitung im verbundenen bexio-Mandanten." },
           ]}
-          primary={{ label: "Upload öffnen", href: "https://app.bp-pilot.ch/upload" }}
-          secondary={{ label: "Preview ansehen", href: "https://app.bp-pilot.ch/preview" }}
+          primary={{ label: "Kostenlos starten", href: "https://app.bp-pilot.ch/upload" }}
           imageSrc={PREVIEWS.upload}
           imageAlt="Upload Wizard Screenshot"
         />
@@ -354,13 +325,12 @@ export default function LandingPage() {
         <FeatureBlock
           kicker="PREVIEW"
           title="Transaktionen prüfen und bereinigen"
-          description="Buchungstexte normalisieren, Betragsstruktur kontrollieren und Datenqualität sichern."
+          description="Buchungstexte normalisieren und Kontierungsqualität sichern. Buchungsregeln einmal definieren und wiederkehrend anwenden."
           bullets={[
-            { title: "Klare Betragslogik", text: "Soll/Haben-ready mit absoluten Werten für den Import." },
-            { title: "Cleanup-Regeln", text: "Wiederkehrende Textmuster automatisch entfernen." },
+            { title: "Klare Betragslogik", text: "Soll/Haben-ready für den Import." },
+            { title: "Cleanup-Regeln", text: "Wiederkehrende Muster automatisch entfernen." },
           ]}
-          primary={{ label: "Preview öffnen", href: "https://app.bp-pilot.ch/preview" }}
-          secondary={{ label: "In Tabelle", href: "https://app.bp-pilot.ch/spreadsheet" }}
+          primary={{ label: "Kostenlos starten", href: "https://app.bp-pilot.ch/upload" }}
           reverse
           imageSrc={PREVIEWS.preview}
           imageAlt="Preview & Mapping Screenshot"
@@ -369,13 +339,12 @@ export default function LandingPage() {
         <FeatureBlock
           kicker="SPREADSHEET"
           title="Buchungsregeln anwenden und kontieren"
-          description="Vorschläge für Konten und automatische Zuordnung auf Basis bestehender Regeln."
+          description="Konten zuordnen und Buchungen regelbasiert beschleunigen. Kontierte Zeilen direkt in den bexio-Mandanten übergeben."
           bullets={[
-            { title: "Schnellere Kontierung", text: "Kontonummer oder Kontoname suchen und direkt übernehmen." },
-            { title: "Weniger Handarbeit", text: "Buchungsregeln füllen Soll/Haben automatisiert vor." },
+            { title: "Schnellere Kontierung", text: "Kontonummer oder Name suchen und übernehmen." },
+            { title: "Weniger Handarbeit", text: "Soll/Haben per Regel vorbefüllen." },
           ]}
-          primary={{ label: "Spreadsheet öffnen", href: "https://app.bp-pilot.ch/spreadsheet" }}
-          secondary={{ label: "Login", href: "https://app.bp-pilot.ch/login" }}
+          primary={{ label: "Kostenlos starten", href: "https://app.bp-pilot.ch/upload" }}
           imageSrc={PREVIEWS.spreadsheet}
           imageAlt="Spreadsheet Screenshot"
         />

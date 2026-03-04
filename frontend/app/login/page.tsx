@@ -224,7 +224,13 @@ export default function LoginPage() {
               {mode === "register" ? (
                 <label className="flex items-start gap-2 text-sm text-slate-600">
                   <input type="checkbox" className="mt-0.5" checked={acceptTerms} onChange={(e) => setAcceptTerms(e.target.checked)} />
-                  <span>Ich stimme den <a className="text-blue-600" href="https://bp-pilot.ch/terms" target="_blank" rel="noreferrer">Terms & Agreements</a> zu.</span>
+                  <span>
+                    Ich stimme den{" "}
+                    <a className="text-blue-600" href="https://bp-pilot.ch/nutzungsbedingungen" target="_blank" rel="noreferrer">
+                      Nutzungsbedingungen
+                    </a>{" "}
+                    zu.
+                  </span>
                 </label>
               ) : null}
 
@@ -273,7 +279,7 @@ export default function LoginPage() {
           position: absolute;
           border-radius: 999px;
           filter: blur(48px);
-          opacity: 0.45;
+          opacity: 0.32;
           animation: drift 24s ease-in-out infinite alternate;
         }
         .login-glow-a {
@@ -281,7 +287,7 @@ export default function LoginPage() {
           height: 48vw;
           max-width: 580px;
           max-height: 580px;
-          background: rgba(37, 99, 235, 0.28);
+          background: rgba(37, 99, 235, 0.2);
           top: -12%;
           left: -10%;
         }
@@ -290,7 +296,7 @@ export default function LoginPage() {
           height: 44vw;
           max-width: 500px;
           max-height: 500px;
-          background: rgba(16, 185, 129, 0.2);
+          background: rgba(16, 185, 129, 0.14);
           right: -8%;
           bottom: -18%;
           animation-duration: 30s;
@@ -299,11 +305,11 @@ export default function LoginPage() {
           position: absolute;
           inset: 0;
           background-image:
-            linear-gradient(to right, rgba(15, 23, 42, 0.055) 1px, transparent 1px),
-            linear-gradient(to bottom, rgba(15, 23, 42, 0.055) 1px, transparent 1px);
-          background-size: 40px 40px;
-          mask-image: radial-gradient(circle at center, rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.08) 70%);
-          animation: gridFloat 22s linear infinite;
+            linear-gradient(to right, rgba(15, 23, 42, 0.04) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(15, 23, 42, 0.04) 1px, transparent 1px);
+          background-size: 46px 46px;
+          mask-image: radial-gradient(circle at center, rgba(0, 0, 0, 0.65), rgba(0, 0, 0, 0.06) 74%);
+          animation: gridFloat 34s linear infinite;
         }
         @keyframes drift {
           0% { transform: translate3d(0, 0, 0) scale(1); }
