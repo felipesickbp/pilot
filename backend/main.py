@@ -1535,6 +1535,25 @@ def _extract_tax_tokens(raw: str) -> List[str]:
     return list({m.group(0) for m in re.finditer(r"[A-Z]{2,}[0-9]{0,3}", upper)})
 
 
+def _collect_tax_scalar_strings(value: Any, depth: int = 0, max_depth: int = 4) -> List[str]:
+    if depth > max_depth:
+        return []
+    out: List[str] = []
+    if isinstance(value, str):
+        s = value.strip()
+        if s:
+            out.append(s)
+        return out
+    if isinstance(value, dict):
+        for v in value.values():
+            out.extend(_collect_tax_scalar_strings(v, depth + 1, max_depth))
+        return out
+    if isinstance(value, list):
+        for item in value:
+            out.extend(_collect_tax_scalar_strings(item, depth + 1, max_depth))
+    return out
+
+
 def _build_tax_lookup(access_token: str) -> Tuple[Dict[str, List[int]], Dict[str, List[int]]]:
     headers = _auth(access_token)
     taxes = _fetch_json_list(f"{BEXIO_API_V3}/accounting/taxes", headers) or _fetch_json_list(
@@ -1547,15 +1566,28 @@ def _build_tax_lookup(access_token: str) -> Tuple[Dict[str, List[int]], Dict[str
             tid = int(t.get("id"))
         except Exception:
             continue
-        for key in ("code", "name", "title", "text"):
+        primary_values: List[str] = []
+        for key in ("code", "name", "title", "text", "tax_code", "short_name", "label", "value", "vat_code", "key"):
             raw = str(t.get(key) or "").strip().upper()
             if raw:
+                primary_values.append(raw)
                 exact_ids.setdefault(raw, set()).add(tid)
                 normalized = _normalize_tax_key(raw)
                 if normalized:
                     exact_ids.setdefault(normalized, set()).add(tid)
                 for token in _extract_tax_tokens(raw):
                     token_ids.setdefault(token, set()).add(tid)
+        # Some tenants expose VAT code hints in alternative fields.
+        # Token-index every scalar string we can find, but keep exact index conservative.
+        all_scalars = _collect_tax_scalar_strings(t)
+        for raw_scalar in all_scalars:
+            raw = str(raw_scalar or "").strip().upper()
+            if not raw:
+                continue
+            if raw in primary_values:
+                continue
+            for token in _extract_tax_tokens(raw):
+                token_ids.setdefault(token, set()).add(tid)
     return (
         {k: sorted(v) for k, v in exact_ids.items()},
         {k: sorted(v) for k, v in token_ids.items()},
