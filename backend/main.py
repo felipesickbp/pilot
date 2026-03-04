@@ -1715,6 +1715,30 @@ def _resolve_tax_id(
     return None, None
 
 
+def _pick_tax_account_id(
+    *,
+    vat_code: str,
+    vat_account_raw: str,
+    debit_id: int,
+    credit_id: int,
+    account_by_number: Dict[str, int],
+    account_by_id: Dict[int, int],
+) -> int:
+    # If user provided VAT account and it resolves to one of the posting sides, honor it.
+    vat_account = str(vat_account_raw or "").strip()
+    if vat_account:
+        resolved = _resolve_account_id(vat_account, account_by_number, account_by_id)
+        if resolved and int(resolved) in (int(debit_id), int(credit_id)):
+            return int(resolved)
+
+    # Otherwise auto-pick a valid side so API validation passes without extra UI columns.
+    # Sales/output-like codes often start with "U" (e.g. ULA): prefer credit side.
+    code = str(vat_code or "").strip().upper()
+    if code.startswith("U"):
+        return int(credit_id)
+    return int(debit_id)
+
+
 def _list_taxes_for_suggestions(access_token: str) -> List[Dict[str, Any]]:
     taxes = _fetch_taxes(access_token)
     out: List[Dict[str, Any]] = []
@@ -2063,13 +2087,14 @@ def post_direct_import_to_bexio(payload: DirectImportPostRequest, request: Reque
                 }
                 if tax_id:
                     entry["tax_id"] = int(tax_id)
-                    vat_account = str(row.vatAccount or "").strip()
-                    if vat_account:
-                        tax_account_id = _resolve_account_id(vat_account, account_by_number, account_by_id)
-                        # Bexio requires tax_account_id to equal debit_account_id or credit_account_id.
-                        # If not, omit tax_account_id and let Bexio infer from the posting entry.
-                        if tax_account_id and int(tax_account_id) in (int(debit_id), int(credit_id)):
-                            entry["tax_account_id"] = int(tax_account_id)
+                    entry["tax_account_id"] = _pick_tax_account_id(
+                        vat_code=vat_code,
+                        vat_account_raw=str(row.vatAccount or ""),
+                        debit_id=int(debit_id),
+                        credit_id=int(credit_id),
+                        account_by_number=account_by_number,
+                        account_by_id=account_by_id,
+                    )
 
                 reference_nr = str(row.reference_nr or "").strip()
                 if payload.auto_reference_nr and not reference_nr:
