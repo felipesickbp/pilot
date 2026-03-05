@@ -331,7 +331,7 @@ a{color:inherit;text-decoration:none}
   overflow:visible;
 }
 .formats-scroll-shell{
-  min-height:165vh;
+  min-height:150vh;
   position:relative;
   overflow:visible;
 }
@@ -469,6 +469,8 @@ a{color:inherit;text-decoration:none}
   :root{
     --formats-pin-top:64px;
   }
+  .brand-sub{display:none}
+  .topbar-cta .btn-primary{display:none}
   .hero-inner{padding:64px 0 26px}
   .h1{font-size:34px;line-height:1.08}
   .lead{font-size:14px;max-width:460px}
@@ -477,11 +479,46 @@ a{color:inherit;text-decoration:none}
   .feature{padding:38px 0}
   .feature-copy .bullets{gap:10px}
   .feature-copy .bullet:nth-child(2){display:none}
-  .formats-scroll-shell{
-    min-height:132vh;
+  .formats-feature{
+    padding-top:8px;
   }
-  .formats-stage{
-    padding-top:12px;
+  .formats-scroll-shell{
+    min-height:auto;
+  }
+  .formats-stage-shell{
+    display:none;
+  }
+  .formats-stage,
+  .formats-stage--before,
+  .formats-stage--pinned,
+  .formats-stage--after{
+    position:relative;
+    inset:auto;
+    top:auto;
+    bottom:auto;
+    height:auto !important;
+    padding-top:0;
+  }
+  .formats-feature-inner{
+    min-height:auto;
+  }
+  .formats-revolver{
+    height:auto;
+    overflow:visible;
+  }
+  .formats-track{
+    transform:none !important;
+    transition:none !important;
+  }
+  .formats-slide{
+    opacity:1 !important;
+    transform:none !important;
+  }
+  .formats-feature .feature-actions{
+    display:none;
+  }
+  .footer-inner{
+    padding:44px 0 44px 14px;
   }
 }
 
