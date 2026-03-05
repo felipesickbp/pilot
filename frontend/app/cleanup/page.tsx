@@ -229,7 +229,7 @@ export default function CleanupPage() {
                   checked={stripBookingWords}
                   onChange={(e) => setStripBookingWords(e.target.checked)}
                 />
-                Buchungswörter entfernen (Gutschrift, Lastschrift, Kontoübertrag usw.)
+                Buchungswörter entfernen (Gutschrift, Lastschrift, Mitteilung, Auftraggeber usw.)
               </label>
 
               <label className="flex items-center gap-2 text-sm">

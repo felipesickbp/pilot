@@ -1008,7 +1008,25 @@ export function normalizeRows(
 }
 
 function toTitleCase(s: string) {
-  return s.toLowerCase().replace(/\b\w/g, (m) => m.toUpperCase());
+  return s.replace(/\p{L}[\p{L}\p{M}\d'’-]*/gu, (word) => {
+    const chars = Array.from(word);
+    if (!chars.length) return word;
+    const [first, ...rest] = chars;
+    return `${first.toLocaleUpperCase("de-CH")}${rest.join("").toLocaleLowerCase("de-CH")}`;
+  });
+}
+
+function sanitizeCleanedDescription(raw: string): string {
+  let s = String(raw || "");
+  s = s.normalize("NFKC");
+  s = s.replace(/[“”„"«»]/g, "");
+  s = s.replace(/[’'`´]/g, "");
+  s = s.replace(/[^\p{L}\p{M}\p{N}\s&-]/gu, " ");
+  s = s.replace(/\s+/g, " ").replace(/\s+,/g, ",");
+  s = s.replace(/^[:;,\-|]+\s*/, "");
+  s = s.replace(/[|;,-]\s*$/g, "");
+  s = s.trimStart().trim();
+  return s;
 }
 
 export function cleanDescriptionWithDiagnostics(
@@ -1022,8 +1040,12 @@ export function cleanDescriptionWithDiagnostics(
   if (opts.stripBookingWords) {
     const before = s;
     s = s.replace(
-      /^(gutschrift|lastschrift|belastung|kontoübertrag|preis für .*?|saldo dienstleistungspreisabschluss)\b[:\s-]*/i,
+      /^(gutschrift|lastschrift|belastung|mitteilung|auftraggeber|preis für|saldo dienstleistungspreisabschluss)\b[:\s-]*/i,
       ""
+    );
+    s = s.replace(
+      /\bkauf\/(?:dienstleistung|online-shopping)\s+vom\s+\d{1,2}\.\d{1,2}\.(?:\d{2,4})?\.?\s+nr\.?\s*[a-z0-9*_-]+\b/gi,
+      " "
     );
     s = s.replace(/\be-banking-sammelauftrag\b/gi, "");
     s = s.replace(/\be-banking inland \(\*e\)\b/gi, "");
@@ -1061,13 +1083,12 @@ export function cleanDescriptionWithDiagnostics(
     }
   }
 
-  s = s.replace(/\s{2,}/g, " ").replace(/\s+,/g, ",").trim();
-  s = s.replace(/^[:;,\-|]+\s*/, "").trim();
-  s = s.replace(/[|;,-]\s*$/g, "").trim();
+  s = sanitizeCleanedDescription(s);
 
   if (opts.titleCase && /[A-ZÄÖÜ]{4,}/.test(raw || "")) {
     const before = s;
     s = toTitleCase(s);
+    s = sanitizeCleanedDescription(s);
     if (s !== before) changed.add("titleCase");
   }
 

@@ -411,7 +411,9 @@ function cleanCell(raw: string): string {
 function normalizeAmount(raw: string): string {
   let s = String(raw ?? "").trim();
   if (!s) return "";
-  s = s.replace(/'/g, "");
+  // Accept Swiss thousands separators and spacing variants from Excel copy/paste.
+  s = s.replace(/[\u00a0\u202f\s]/g, "");
+  s = s.replace(/['’`´]/g, "");
   if (s.includes(",") && !s.includes(".")) s = s.replace(",", ".");
   if (s.includes(".") && s.includes(",")) s = s.replace(/,/g, "");
   return s;
@@ -419,8 +421,14 @@ function normalizeAmount(raw: string): string {
 
 function normalizeDate(raw: string): string {
   const s = String(raw ?? "").trim();
-  const m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
-  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  const m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})$/);
+  if (m) {
+    const day = m[1].padStart(2, "0");
+    const month = m[2].padStart(2, "0");
+    const rawYear = m[3];
+    const year = rawYear.length === 2 ? `20${rawYear}` : rawYear;
+    return `${year}-${month}-${day}`;
+  }
   return s;
 }
 
