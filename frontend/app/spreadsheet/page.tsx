@@ -334,7 +334,6 @@ export default function SpreadsheetPage() {
           className="w-full min-w-0 bg-transparent outline-none"
           placeholder={field === "sollAccount" ? "Soll" : "Haben"}
           value={value}
-          list="account-options-global"
           onFocus={() => setActiveCell(key)}
           onBlur={() => {
             const normalized = normalizeAccountNo(value);
@@ -487,14 +486,6 @@ export default function SpreadsheetPage() {
           </div>
         </CardContent>
       </Card>
-
-      <datalist id="account-options-global">
-        {accounts.map((a) => (
-          <option key={`global-${a.id}-${a.number}`} value={`${a.number} ${a.name}`}>
-            {a.display}
-          </option>
-        ))}
-      </datalist>
 
       <div className="mt-6">
         <Card>
