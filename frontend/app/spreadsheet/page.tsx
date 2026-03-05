@@ -500,7 +500,7 @@ export default function SpreadsheetPage() {
         <Card>
           <CardHeader>
             <div className="text-sm font-semibold">Transaktionsdaten</div>
-            <Subhead>Datum, Konten und MWST sind direkt bearbeitbar. Einzelne Zeilen können gelöscht werden.</Subhead>
+            <Subhead>Datum, Beschreibung, Konten und MWST sind direkt bearbeitbar. Einzelne Zeilen können gelöscht werden.</Subhead>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-hidden overflow-y-auto rounded-xl border border-[color:var(--bp-border)] bg-white">
@@ -536,7 +536,11 @@ export default function SpreadsheetPage() {
 
                         <td className="p-3">
                           <div className="rounded-lg border border-[color:var(--bp-border)] bg-white px-2 py-1 break-words whitespace-normal">
-                            {r.description}
+                            <input
+                              className="w-full min-w-0 bg-transparent outline-none"
+                              value={r.description}
+                              onChange={(e) => updateRow(r.id, { description: e.target.value })}
+                            />
                           </div>
                         </td>
 

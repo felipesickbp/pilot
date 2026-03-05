@@ -319,7 +319,7 @@ export default function CleanupPage() {
                     </tr>
                   </thead>
                   <tbody className="text-slate-700">
-                    {cleanedRows.slice(0, 20).map((r, idx) => (
+                    {cleanedRows.map((r, idx) => (
                       <tr key={r.id} className="border-t border-[color:var(--bp-border)] align-top">
                         <td className="p-3 text-xs text-slate-500">{rows[idx]?.description || "—"}</td>
                         <td className="p-3">{r.description}</td>

@@ -1029,6 +1029,37 @@ function sanitizeCleanedDescription(raw: string): string {
   return s;
 }
 
+function removeRedundantRepeats(raw: string): string {
+  const words = safeText(raw).split(" ").filter(Boolean);
+  if (!words.length) return "";
+
+  const out: string[] = [];
+  for (const word of words) {
+    const prev = out[out.length - 1];
+    if (prev && prev.toLocaleLowerCase("de-CH") === word.toLocaleLowerCase("de-CH")) continue;
+    out.push(word);
+  }
+
+  // Remove immediate repeated phrases: "Efep Gmbh Efep Gmbh" -> "Efep Gmbh"
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let size = 4; size >= 2; size--) {
+      for (let i = 0; i + 2 * size <= out.length; i++) {
+        const a = out.slice(i, i + size).map((w) => w.toLocaleLowerCase("de-CH")).join(" ");
+        const b = out.slice(i + size, i + 2 * size).map((w) => w.toLocaleLowerCase("de-CH")).join(" ");
+        if (a !== b) continue;
+        out.splice(i + size, size);
+        changed = true;
+        break;
+      }
+      if (changed) break;
+    }
+  }
+
+  return out.join(" ");
+}
+
 export function cleanDescriptionWithDiagnostics(
   raw: string,
   opts: CleanupRuleOptions,
@@ -1091,6 +1122,8 @@ export function cleanDescriptionWithDiagnostics(
     s = sanitizeCleanedDescription(s);
     if (s !== before) changed.add("titleCase");
   }
+
+  s = removeRedundantRepeats(s);
 
   return {
     text: s || "Unbekannte Buchung",
