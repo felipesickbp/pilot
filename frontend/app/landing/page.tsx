@@ -1,6 +1,6 @@
 "use client";
 // /opt/bp-pilot/app/frontend/app/landing/page.tsx
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import "./landing.css";
 import { LogoMark } from "../components/logo-mark";
 import type { ReactNode } from "react";
@@ -177,120 +177,81 @@ function FormatRow({
 }
 
 function FormatsFeature() {
-  type PinState = "before" | "pinned" | "after";
-  const [progress, setProgress] = useState(0);
-  const [pinState, setPinState] = useState<PinState>("before");
-  const [stageHeight, setStageHeight] = useState(0);
-  const scrollShellRef = useRef<HTMLDivElement | null>(null);
-  const rafRef = useRef<number | null>(null);
+  const [active, setActive] = useState(0);
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const lastStepRef = useRef(0);
 
-  useEffect(() => {
-    const getPinTop = () => {
-      const raw = window.getComputedStyle(document.documentElement).getPropertyValue("--formats-pin-top");
-      const parsed = Number.parseFloat(raw);
-      return Number.isFinite(parsed) ? parsed : 72;
-    };
+  const handleWheelCapture = (event: React.WheelEvent<HTMLElement>) => {
+    const section = sectionRef.current;
+    if (!section) return;
+    const delta = event.deltaY;
+    if (!delta) return;
 
-    const updateProgress = () => {
-      rafRef.current = null;
-      const shell = scrollShellRef.current;
-      if (!shell) return;
+    const rect = section.getBoundingClientRect();
+    const vh = window.innerHeight;
+    const inViewBand = rect.top < vh * 0.95 && rect.bottom > vh * 0.05;
+    if (!inViewBand) return;
 
-      const rect = shell.getBoundingClientRect();
-      const viewport = window.innerHeight || 1;
-      const pinTop = getPinTop();
-      const isMobile = window.matchMedia("(max-width: 700px)").matches;
-      const uncappedStage = Math.max(320, viewport - pinTop);
-      const nextStageHeight = isMobile ? uncappedStage : Math.min(760, uncappedStage);
-      const travel = Math.max(rect.height - nextStageHeight, 1);
-      const pinRaw = (pinTop - rect.top) / travel;
-      const progressLead = isMobile ? 0 : 52;
-      const progressRaw = (pinTop + progressLead - rect.top) / travel;
-      const next = Math.max(0, Math.min(1, progressRaw));
-      setProgress((prev) => (Math.abs(prev - next) < 0.001 ? prev : next));
-      setStageHeight((prev) => (Math.abs(prev - nextStageHeight) < 0.5 ? prev : nextStageHeight));
-      const nextPinState: PinState = pinRaw <= 0 ? "before" : pinRaw >= 1 ? "after" : "pinned";
-      setPinState((prev) => (prev === nextPinState ? prev : nextPinState));
-    };
+    const dir = delta > 0 ? 1 : -1;
+    const atFirst = active === 0;
+    const atLast = active === FORMAT_ITEMS.length - 1;
+    const canStep = (dir > 0 && !atLast) || (dir < 0 && !atFirst);
+    if (!canStep) return;
 
-    const requestUpdate = () => {
-      if (rafRef.current !== null) return;
-      rafRef.current = window.requestAnimationFrame(updateProgress);
-    };
-
-    requestUpdate();
-    window.addEventListener("scroll", requestUpdate, { passive: true });
-    window.addEventListener("resize", requestUpdate);
-    return () => {
-      window.removeEventListener("scroll", requestUpdate);
-      window.removeEventListener("resize", requestUpdate);
-      if (rafRef.current !== null) {
-        window.cancelAnimationFrame(rafRef.current);
-      }
-    };
-  }, []);
-
-  const currentIndex = progress * (FORMAT_ITEMS.length - 1);
-  const trackY = REVOLVER_CENTER_OFFSET - currentIndex * REVOLVER_PITCH;
+    const now = Date.now();
+    event.preventDefault();
+    if (now - lastStepRef.current < 200) return;
+    lastStepRef.current = now;
+    setActive((prev) => Math.max(0, Math.min(FORMAT_ITEMS.length - 1, prev + dir)));
+  };
 
   return (
-    <section className="feature formats-feature" id="upload">
-      <div className="formats-scroll-shell" ref={scrollShellRef}>
-        <div className="formats-stage-shell" style={stageHeight ? { height: `${stageHeight}px` } : undefined} />
-        <div
-          className={`formats-stage formats-stage--${pinState}`}
-          style={stageHeight ? { height: `${stageHeight}px` } : undefined}
-        >
-          <div className="container feature-inner formats-feature-inner">
-            <div className="feature-copy">
-              <div className="kicker">UPLOAD</div>
-              <h3 className="h2">Alle gängigen Formate direkt einlesen</h3>
-              <p className="muted">CSV, Excel oder CAMT: bp-pilot startet ohne starre Templates.</p>
-              <div className="bullets">
-                <div className="bullet">
-                  <div className="bullet-icon" aria-hidden="true" />
-                  <div>
-                    <div className="bullet-title">Weniger Vorarbeit</div>
-                    <div className="muted">Auch uneinheitliche Exporte sind direkt nutzbar.</div>
-                  </div>
-                </div>
-                <div className="bullet">
-                  <div className="bullet-icon" aria-hidden="true" />
-                  <div>
-                    <div className="bullet-title">Schneller zum Mapping</div>
-                    <div className="muted">Erkannte Formate landen direkt im passenden Schritt.</div>
-                  </div>
-                </div>
-              </div>
-              <div className="feature-actions">
-                <a className="btn btn-primary" href="https://app.bp-pilot.ch/upload">
-                  Kostenlos starten
-                </a>
+    <section className="feature formats-feature" id="upload" ref={sectionRef} onWheelCapture={handleWheelCapture}>
+      <div className="container feature-inner formats-feature-inner">
+        <div className="feature-copy">
+          <div className="kicker">UPLOAD</div>
+          <h3 className="h2">Alle gängigen Formate direkt einlesen</h3>
+          <p className="muted">CSV, Excel oder CAMT: bp-pilot startet ohne starre Templates.</p>
+          <div className="bullets">
+            <div className="bullet">
+              <div className="bullet-icon" aria-hidden="true" />
+              <div>
+                <div className="bullet-title">Weniger Vorarbeit</div>
+                <div className="muted">Auch uneinheitliche Exporte sind direkt nutzbar.</div>
               </div>
             </div>
+            <div className="bullet">
+              <div className="bullet-icon" aria-hidden="true" />
+              <div>
+                <div className="bullet-title">Schneller zum Mapping</div>
+                <div className="muted">Erkannte Formate landen direkt im passenden Schritt.</div>
+              </div>
+            </div>
+          </div>
+          <div className="feature-actions">
+            <a className="btn btn-primary" href="https://app.bp-pilot.ch/upload">
+              Kostenlos starten
+            </a>
+          </div>
+        </div>
 
-            <div className="feature-visual formats-visual-shell">
-              <div className="visual capability-visual formats-sticky">
-                <div className="formats-revolver">
-                  <div className="formats-track" style={{ transform: `translateY(${trackY}px)` }} aria-live="polite">
-                    {FORMAT_ITEMS.map((item, idx) => {
-                      const delta = idx - currentIndex;
-                      const distance = Math.min(Math.abs(delta), 3);
-                      const opacity = Math.max(0.1, 1 - distance * 0.42);
-                      const scale = Math.max(0.78, 1 - distance * 0.08);
-                      const xShift = delta * 14;
-                      return (
-                        <div
-                          key={item.title}
-                          className="formats-slide"
-                          style={{ opacity, transform: `translateX(${xShift}px) scale(${scale})` }}
-                        >
-                          <FormatRow icon={item.icon} title={item.title} desc={item.desc} />
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
+        <div className="feature-visual formats-visual-shell">
+          <div className="visual capability-visual formats-sticky">
+            <div className="formats-revolver">
+              <div
+                className="formats-track"
+                style={{ transform: `translateY(${REVOLVER_CENTER_OFFSET - active * REVOLVER_PITCH}px)` }}
+                aria-live="polite"
+              >
+                {FORMAT_ITEMS.map((item, idx) => {
+                  const distance = Math.abs(idx - active);
+                  const tone = distance === 0 ? "is-active" : distance === 1 ? "is-near" : "is-far";
+                  return (
+                    <div key={item.title} className={`formats-slide ${tone}`}>
+                    <FormatRow icon={item.icon} title={item.title} desc={item.desc} />
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
