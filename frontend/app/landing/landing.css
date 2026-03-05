@@ -284,6 +284,9 @@ a{color:inherit;text-decoration:none}
   padding:56px 0;
   position:relative;
 }
+#preview.feature{
+  padding-top:24px;
+}
 .feature-inner{display:grid;gap:22px;align-items:center}
 .feature-inner.reverse .feature-copy{order:2}
 .feature-inner.reverse .feature-visual{order:1}
@@ -326,7 +329,7 @@ a{color:inherit;text-decoration:none}
   display:flex;
 }
 .formats-feature{
-  padding-top:20px;
+  padding-top:28px;
   padding-bottom:0;
   overflow:visible;
 }
@@ -477,6 +480,7 @@ a{color:inherit;text-decoration:none}
   .hero-kpi-row{display:none}
   .section-head{padding:74px 16px 8px}
   .feature{padding:38px 0}
+  #preview.feature{padding-top:16px}
   .feature-copy .bullets{gap:10px}
   .feature-copy .bullet:nth-child(2){display:none}
   .formats-feature{

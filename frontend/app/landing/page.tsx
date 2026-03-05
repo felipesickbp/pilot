@@ -203,11 +203,13 @@ function FormatsFeature() {
       const uncappedStage = Math.max(320, viewport - pinTop);
       const nextStageHeight = isMobile ? uncappedStage : Math.min(760, uncappedStage);
       const travel = Math.max(rect.height - nextStageHeight, 1);
-      const raw = (pinTop - rect.top) / travel;
-      const next = Math.max(0, Math.min(1, raw));
+      const pinRaw = (pinTop - rect.top) / travel;
+      const progressLead = isMobile ? 0 : 52;
+      const progressRaw = (pinTop + progressLead - rect.top) / travel;
+      const next = Math.max(0, Math.min(1, progressRaw));
       setProgress((prev) => (Math.abs(prev - next) < 0.001 ? prev : next));
       setStageHeight((prev) => (Math.abs(prev - nextStageHeight) < 0.5 ? prev : nextStageHeight));
-      const nextPinState: PinState = raw <= 0 ? "before" : raw >= 1 ? "after" : "pinned";
+      const nextPinState: PinState = pinRaw <= 0 ? "before" : pinRaw >= 1 ? "after" : "pinned";
       setPinState((prev) => (prev === nextPinState ? prev : nextPinState));
     };
 
