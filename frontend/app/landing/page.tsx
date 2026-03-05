@@ -199,7 +199,9 @@ function FormatsFeature() {
       const rect = shell.getBoundingClientRect();
       const viewport = window.innerHeight || 1;
       const pinTop = getPinTop();
-      const nextStageHeight = Math.max(320, viewport - pinTop);
+      const isMobile = window.matchMedia("(max-width: 700px)").matches;
+      const uncappedStage = Math.max(320, viewport - pinTop);
+      const nextStageHeight = isMobile ? uncappedStage : Math.min(760, uncappedStage);
       const travel = Math.max(rect.height - nextStageHeight, 1);
       const raw = (pinTop - rect.top) / travel;
       const next = Math.max(0, Math.min(1, raw));
